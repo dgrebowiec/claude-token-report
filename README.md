@@ -6,7 +6,7 @@ conversations and an expired cache add to your usage.
 
 - reads only local transcripts (`~/.claude/projects/**/*.jsonl`)
 - sends nothing and calls no API, so it uses **0 tokens**
-- one file, Python 3.8+, no dependencies
+- Python 3.8+, standard library only, no dependencies
 - English by default, Polish with `-l pl`
 
 ## Install
@@ -18,6 +18,7 @@ python3 claude_token_report.py --help
 ```
 
 Optionally put it on your `PATH`: `ln -s "$PWD/claude_token_report.py" ~/.local/bin/claude-token-report`
+(`python3 -m token_report` works too).
 
 ## Usage
 
@@ -54,8 +55,29 @@ The weights are the price ratios from Anthropic's public API pricing. Anthropic 
 behind subscription limits, so the report assumes limits count tokens in the same proportions. That is an
 approximation, not an official number. Run `--explain` for the full explanation with a worked example.
 
-The weights live in the `PRICES` table at the top of the script (as of 2026-09). Only the ratios matter.
+The weights live in the price table in `token_report/pricing.py` (as of 2026-09). Only the ratios matter.
 You can override them with `--prices my.json`, for example `{"opus-5": [5, 25, 0.5]}` (input, output, cache read).
+
+## Development
+
+`claude_token_report.py` is only a launcher; the code is in the `token_report/` package:
+
+| module | what it does |
+|---|---|
+| `transcripts.py` | reads the `.jsonl` transcripts into `Call` and `SessionMeta` objects |
+| `pricing.py` | token types, model prices and weights |
+| `classify.py` | which activity a call belongs to (tool, kind of shell command) |
+| `stats.py` | aggregates calls into `Stats` (by activity, model, project, day, context size...) |
+| `daily.py`, `tips.py` | the `--daily` comparison and the suggestions |
+| `periods.py` | `--days/--date/--from...` time windows |
+| `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |
+| `cli.py` | command line options, ties it all together |
+
+Tests use only the standard library:
+
+```bash
+python3 -m unittest
+```
 
 ## License
 
