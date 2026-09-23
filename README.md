@@ -56,3 +56,7 @@ approximation, not an official number. Run `--explain` for the full explanation 
 
 The weights live in the `PRICES` table at the top of the script (as of 2026-09). Only the ratios matter.
 You can override them with `--prices my.json`, for example `{"opus-5": [5, 25, 0.5]}` (input, output, cache read).
+
+## License
+
+[MIT](LICENSE)
