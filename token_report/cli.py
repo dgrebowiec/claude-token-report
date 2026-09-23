@@ -8,7 +8,7 @@ import sys
 import urllib.parse
 from typing import List, Optional, Sequence
 
-from . import i18n
+from . import __version__, i18n
 from .context import ReportContext
 from .daily import DayRow, daily_rows, daily_series
 from .explain import explain_text
@@ -121,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("wyjaśnij tokeny surowe i ważone", "explain raw and weighted tokens"))
     g.add_argument("--lang", "-l", choices=list(i18n.SUPPORTED), default="en",
                    help=L("język: en (domyślnie) lub pl", "language: en (default) or pl"))
+    g.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     g.add_argument("--dir", metavar=L("KATALOG", "DIR"),
                    help=L("katalog transkryptów (domyślnie ~/.claude/projects)",
                           "transcripts dir (default ~/.claude/projects)"))

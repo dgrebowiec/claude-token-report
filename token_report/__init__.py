@@ -10,4 +10,4 @@ Modules, in the order data flows through them:
   stats        aggregate calls into Stats; daily: the --daily comparison; tips: suggestions
   report_text / report_html   render the reports; cli: the command line
 """
-__version__ = "1.0.0"
+__version__ = "1.0.0"  # bump on every release, or `pipx upgrade` won't see it

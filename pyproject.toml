@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-token-report"
-version = "1.0.0"
+dynamic = ["version"]  # from token_report/__init__.py
 description = "Where do your Claude Code tokens actually go? Reads local transcripts, uses 0 tokens."
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,6 +25,9 @@ claude-token-report = "token_report.cli:run"
 
 [tool.setuptools]
 packages = ["token_report"]
+
+[tool.setuptools.dynamic]
+version = { attr = "token_report.__version__" }
 
 [tool.setuptools.package-data]
 token_report = ["assets/*"]

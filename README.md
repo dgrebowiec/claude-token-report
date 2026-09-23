@@ -22,7 +22,8 @@ pipx install git+https://github.com/dgrebowiec/claude-token-report
 claude-token-report --help
 ```
 
-Update with `pipx upgrade claude-token-report` (or `uv tool upgrade claude-token-report`).
+Update with `pipx upgrade claude-token-report` (or `uv tool upgrade claude-token-report`);
+`claude-token-report --version` shows which version you have.
 Try it once without installing: `uvx --from git+https://github.com/dgrebowiec/claude-token-report claude-token-report`
 
 **Or just clone it**, since there is nothing to install:
@@ -88,6 +89,10 @@ You can override them with `--prices my.json`, for example `{"opus-5": [5, 25, 0
 | `periods.py` | `--days/--date/--from...` time windows |
 | `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |
 | `cli.py` | command line options, ties it all together |
+
+Releasing: bump `__version__` in `token_report/__init__.py` (the only place the version lives).
+`pipx upgrade` compares version numbers, so without a bump it keeps the old code
+(`uv tool upgrade` follows the latest commit either way).
 
 Tests use only the standard library:
 
