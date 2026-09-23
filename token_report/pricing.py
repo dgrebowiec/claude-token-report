@@ -67,7 +67,7 @@ def unknown_models() -> List[str]:
 
 def load_price_overrides(path: str) -> None:
     """JSON: {"model-substring": [input, output, cache_read], ...} — checked before the table."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     extra = [(k.lower(), float(v[0]), float(v[1]), float(v[2])) for k, v in data.items()]
     _PRICES[:0] = extra

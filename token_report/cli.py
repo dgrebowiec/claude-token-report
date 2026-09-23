@@ -23,12 +23,16 @@ from .report_text import session_list, text_daily, text_diff, text_report
 from .stats import aggregate
 from .transcripts import Call, default_root, find_session, load, recent_sessions
 
-PROG = "claude_token_report.py"
+
+def _prog_name() -> str:
+    """how the user started us: claude_token_report.py, claude-token-report or python -m"""
+    name = os.path.basename(sys.argv[0])
+    return "python3 -m token_report" if name == "__main__.py" else name or "claude-token-report"
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog=PROG,
+        prog=_prog_name(),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=L(
             "Raport dla subskrypcji Claude (Pro/Max): na co dokładnie idą tokeny w Claude Code.\n"
@@ -228,7 +232,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
 
 def run() -> None:
+    # e.g. a Windows console or a redirected stdout that can't encode ▲ ▼ … — don't crash
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     try:
         main()
+        sys.stdout.flush()
     except BrokenPipeError:
-        pass
+        # output piped into e.g. `head` that exited early: silence the error at interpreter exit
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())

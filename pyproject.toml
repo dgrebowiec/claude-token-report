@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-token-report"
+version = "1.0.0"
+description = "Where do your Claude Code tokens actually go? Reads local transcripts, uses 0 tokens."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "dgrebowiec" }]
+requires-python = ">=3.8"
+dependencies = []  # standard library only
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+]
+
+[project.urls]
+Homepage = "https://github.com/dgrebowiec/claude-token-report"
+
+[project.scripts]
+claude-token-report = "token_report.cli:run"
+
+[tool.setuptools]
+packages = ["token_report"]
+
+[tool.setuptools.package-data]
+token_report = ["assets/*"]

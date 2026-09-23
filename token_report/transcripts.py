@@ -195,7 +195,7 @@ class _Loader:
             self._read_agent_meta(tf)
         sess = self.sessions.setdefault((tf.proj_dir, tf.session_id), SessionMeta(tf.proj_dir))
         try:
-            fh = open(tf.path, errors="replace")
+            fh = open(tf.path, encoding="utf-8", errors="replace")
         except OSError:
             return
         with fh:
@@ -211,7 +211,7 @@ class _Loader:
 
     def _read_agent_meta(self, tf: TranscriptFile) -> None:
         try:
-            with open(tf.path[:-len(".jsonl")] + ".meta.json") as f:
+            with open(tf.path[:-len(".jsonl")] + ".meta.json", encoding="utf-8") as f:
                 meta = json.load(f)
             if meta.get("agentType"):
                 self.type_by_agent_meta[tf.agent_id] = meta["agentType"]

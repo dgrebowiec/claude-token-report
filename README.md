@@ -11,14 +11,30 @@ conversations and an expired cache add to your usage.
 
 ## Install
 
+Works on Linux, macOS and Windows, anywhere Claude Code keeps its transcripts in
+`~/.claude/projects` (on Windows `%USERPROFILE%\.claude\projects`).
+
+**As a command** (recommended), with [pipx](https://pipx.pypa.io) or [uv](https://docs.astral.sh/uv/):
+
+```bash
+pipx install git+https://github.com/dgrebowiec/claude-token-report
+# or: uv tool install git+https://github.com/dgrebowiec/claude-token-report
+claude-token-report --help
+```
+
+Update with `pipx upgrade claude-token-report` (or `uv tool upgrade claude-token-report`).
+Try it once without installing: `uvx --from git+https://github.com/dgrebowiec/claude-token-report claude-token-report`
+
+**Or just clone it**, since there is nothing to install:
+
 ```bash
 git clone https://github.com/dgrebowiec/claude-token-report.git
 cd claude-token-report
 python3 claude_token_report.py --help
 ```
 
-Optionally put it on your `PATH`: `ln -s "$PWD/claude_token_report.py" ~/.local/bin/claude-token-report`
-(`python3 -m token_report` works too).
+The examples below use `python3 claude_token_report.py` (on Windows usually `py claude_token_report.py`);
+with pipx/uv just type `claude-token-report` instead.
 
 ## Usage
 
