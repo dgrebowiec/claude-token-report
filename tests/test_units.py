@@ -5,6 +5,7 @@ import unittest
 from token_report import i18n
 from token_report.classify import NO_TOOL, classify_bash, classify_tool
 from token_report.formatting import arrow, fmt_change, fmt_tok, short
+from token_report.naming import Namer
 from token_report.periods import parse_day, resolve_window
 from token_report.pricing import model_weight, split_usage, weighted_by_type
 
@@ -104,6 +105,15 @@ def _args(**kw):
                 all=False, rolling=False)
     base.update(kw)
     return argparse.Namespace(**base)
+
+
+class NamerTest(unittest.TestCase):
+    def test_private_hides_custom_agent_types(self):
+        namer = Namer(private=True)
+        self.assertEqual(namer.agent_type("Explore"), "Explore")
+        self.assertEqual(namer.agent_type("my-reviewer"), "agent-1")
+        self.assertEqual(namer.agent_type("my-reviewer"), "agent-1")
+        self.assertEqual(Namer(private=False).agent_type("my-reviewer"), "my-reviewer")
 
 
 class PeriodsTest(unittest.TestCase):

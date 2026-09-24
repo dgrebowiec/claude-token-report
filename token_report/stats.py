@@ -201,7 +201,9 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
     stats.by_project[project].add(w, raw)
     stats.by_side["sub" if call.is_subagent else "main"].add(w, raw)
     if call.is_subagent:
-        stats.by_agent_type[call.agent_type or L("(nieznany typ)", "(unknown type)")].add(w, raw)
+        agent_type = namer.agent_type(call.agent_type) if call.agent_type \
+            else L("(nieznany typ)", "(unknown type)")
+        stats.by_agent_type[agent_type].add(w, raw)
 
     loc = call.time.astimezone()
     day = stats.by_day[f"{loc:%Y-%m-%d} {weekday(loc.date())}"]

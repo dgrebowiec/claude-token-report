@@ -52,6 +52,10 @@ python3 claude_token_report.py --session 1a2b   # one session, usage per request
 python3 claude_token_report.py --html report.html --private   # shareable HTML, no names or prompts
 ```
 
+Example reports (last 7 days with `--daily --private`, real usage with names hidden):
+[terminal](examples/report.txt) ·
+[HTML](https://htmlpreview.github.io/?https://github.com/dgrebowiec/claude-token-report/blob/main/examples/report.html)
+
 Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM-DD` (current year), `today`, `yesterday`.
 
 `--daily` compares every day with the day before it: the change in weighted tokens (▲/▼), cache hit rate,

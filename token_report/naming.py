@@ -8,6 +8,9 @@ from typing import Dict, Optional
 from .transcripts import SessionMeta
 
 _WORKTREE = re.compile(r"^(.*?)[/\\]\.claude[/\\]worktrees[/\\]([^/\\]+)")
+# subagent types that ship with Claude Code; user-defined ones are anonymised with --private
+_BUILTIN_AGENTS = {"general-purpose", "Explore", "Plan", "fork", "claude", "statusline-setup",
+                   "claude-code-guide"}
 
 
 class Namer:
@@ -15,6 +18,7 @@ class Namer:
         self.private = private
         self._projects: Dict[str, str] = {}
         self._files: Dict[str, str] = {}
+        self._agents: Dict[str, str] = {}
 
     def project(self, meta: Optional[SessionMeta], proj_dir: str) -> str:
         cwd = meta.cwd if meta else None
@@ -51,6 +55,13 @@ class Namer:
             ext = os.path.splitext(base)[1]
             self._files[path] = f"file-{len(self._files) + 1}{ext}"
         return self._files[path]
+
+    def agent_type(self, name: str) -> str:
+        if not self.private or name in _BUILTIN_AGENTS:
+            return name
+        if name not in self._agents:
+            self._agents[name] = f"agent-{len(self._agents) + 1}"
+        return self._agents[name]
 
     def topic(self, text: Optional[str]) -> str:
         return "" if self.private else (text or "")
