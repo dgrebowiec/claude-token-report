@@ -6,14 +6,14 @@ import textwrap
 from typing import Callable, List, Mapping, Optional, Tuple
 
 from .classify import activity_name
-from .context import ReportContext
+from .context import TOP_ROWS, ReportContext
 from .daily import DayRow, daily_summary
 from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, pct, short,
                          side_name)
 from .i18n import L, weekday
 from .naming import Namer
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
-from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth
+from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
 from .tips import tips
 from .transcripts import TranscriptFile, load
 
@@ -61,20 +61,22 @@ def _breakdown(out: _Lines, title: str, groups: Mapping[str, Bucket], total: flo
     total = total or 1e-9
     n_label = n_label or L("wywoł.", "calls")
     extra_head = f"{extra[0]:>7}" if extra else ""
-    out.add(f" {label:<38}{L('ważone', 'weighted'):>10}{'%':>7}{n_label:>8}"
-            f"{L('śr./szt.', 'avg'):>9}{extra_head}  ")
+    out.add(f" {label:<32}{L('surowe', 'raw'):>9}{L('ważone', 'weighted'):>10}{'%':>7}"
+            f"{n_label:>8}{L('śr./szt.', 'avg'):>9}{extra_head}  ")
     items = sorted(groups.items(), key=lambda kv: -kv[1].weighted)
     for key, b in items[:top]:
-        name = short(str(names(key)), 37) if left else str(names(key))[:37]
+        name = short(str(names(key)), 31) if left else str(names(key))[:31]
         extra_val = f"{extra[1](key):>7}" if extra else ""
-        out.add(f" {name:<38}{fmt_tok(b.weighted):>10}{pct(b.weighted, total):>6.1f}%{b.calls:>8}"
+        out.add(f" {name:<32}{fmt_tok(b.raw):>9}{fmt_tok(b.weighted):>10}"
+                f"{pct(b.weighted, total):>6.1f}%{b.calls:>8}"
                 f"{fmt_tok(b.weighted / b.calls if b.calls else 0):>9}{extra_val}  "
-                f"{bar(b.weighted / total)}")
+                f"{bar(b.weighted / total, 20)}")
     rest = items[top:]
     if rest:
         rest_w = sum(b.weighted for _, b in rest)
-        out.add(f" {L(f'(pozostałe: {len(rest)})', f'(other: {len(rest)})'):<38}"
-                f"{fmt_tok(rest_w):>10}{pct(rest_w, total):>6.1f}%")
+        rest_raw = sum(b.raw for _, b in rest)
+        out.add(f" {L(f'(pozostałe: {len(rest)})', f'(other: {len(rest)})'):<32}"
+                f"{fmt_tok(rest_raw):>9}{fmt_tok(rest_w):>10}{pct(rest_w, total):>6.1f}%")
 
 
 # --------------------------------------------------------------------------- main report
@@ -84,48 +86,24 @@ def _summary(out: _Lines, stats: Stats) -> None:
     hit = cache_hit(stats.tokens)
 
     def item(name: str, value: str, text: str) -> None:
-        out.add(f" {name:<26}{value:>12}")
-        out.note(text, 5)
+        out.add(f" {name:<26}{value:>12}   {text}")
 
-    item(L("wywołania modelu", "model calls"), fmt_int(stats.n_calls), L(
-        f"Tyle razy Claude Code wysłał zapytanie do modelu (w {stats.n_sessions} rozmowach, "
-        f"z {stats.n_subagents} subagentami). Jedna Twoja wiadomość to zwykle od kilku do "
-        f"kilkudziesięciu wywołań: każde użycie narzędzia (odczyt pliku, komenda, edycja) to "
-        f"kolejne wywołanie.",
-        f"How many times Claude Code sent a request to the model (in {stats.n_sessions} "
-        f"conversations, with {stats.n_subagents} subagents). One message from you usually means "
-        f"several to dozens of calls: every tool use (reading a file, a command, an edit) is "
-        f"another call."))
-    item(L("tokeny surowe", "raw tokens"), fmt_tok(raw), L(
-        "Cały tekst, który model przeczytał i napisał, liczony po równo. Model nie pamięta "
-        "rozmowy, więc przy każdym wywołaniu czyta ją od początku — stąd tak ogromna liczba. "
-        "Sama w sobie niewiele mówi, bo większość to tani powtórny odczyt z cache.",
-        "All the text the model read and wrote, every token counted the same. The model has "
-        "no memory, so it re-reads the whole conversation on every call — hence the huge "
-        "number. On its own it says little, because most of it is cheap re-reading from cache."))
-    item(L("tokeny ważone", "weighted tokens"), fmt_tok(stats.weighted), L(
-        "GŁÓWNA MIARA RAPORTU. Te same tokeny, ale każdy liczony według tego, jak mocno "
-        "obciąża limit: powtórny odczyt z cache x0.1, nowy tekst x1, zapis do cache x1.25, "
-        "odpowiedź modelu x5, a do tego waga modelu (Opus 5 x1, Sonnet 5 x0.4). Wszystkie "
-        "procenty niżej są liczone od tej wartości. Szczegóły: --explain",
-        "THE MAIN MEASURE OF THIS REPORT. The same tokens, but each counted by how heavily it "
-        "uses your limit: re-reading from cache x0.1, new text x1, cache write x1.25, model "
-        "output x5, plus the model's weight (Opus 5 x1, Sonnet 5 x0.4). All percentages below "
-        "are shares of this number. Details: --explain"))
+    item(L("wywołania modelu", "model calls"), fmt_int(stats.n_calls),
+         L(f"{stats.n_sessions} rozmów, {stats.n_subagents} subagentów",
+           f"{stats.n_sessions} conversations, {stats.n_subagents} subagents"))
+    item(L("tokeny surowe", "raw tokens"), fmt_tok(raw),
+         L("wszystkie tokeny liczone po równo", "all tokens counted equally"))
+    item(L("tokeny ważone", "weighted tokens"), fmt_tok(stats.weighted),
+         L("główna miara — obciążenie limitu (--explain)",
+           "main measure — load on your limit (--explain)"))
     if hit is not None:
-        item(L("trafienia w cache", "cache hit rate"), f"{hit:.1f}%", L(
-            "Jaka część rozmowy była tanim powtórnym odczytem z cache. Powyżej ~90% to dobry "
-            "wynik. Spadki oznaczają przerwy dłuższe niż 5 minut albo zmiany na początku "
-            "rozmowy (np. zmianę modelu).",
-            "How much of the conversation was cheap re-reading from cache. Above ~90% is good. "
-            "Drops mean breaks longer than 5 minutes or changes at the start of the "
-            "conversation (e.g. switching models)."))
+        item(L("trafienia w cache", "cache hit rate"), f"{hit:.1f}%",
+             L("powyżej ~90% to dobry wynik", "above ~90% is good"))
     if stats.n_calls:
         ctx_tokens = raw - stats.tokens["output"]
-        item(L("średnio na wywołanie", "average per call"), fmt_tok(stats.weighted / stats.n_calls), L(
-            f"tokenów ważonych; model czytał wtedy średnio {fmt_tok(ctx_tokens / stats.n_calls)} tokenów "
-            f"rozmowy.", f"weighted tokens; the model was reading {fmt_tok(ctx_tokens / stats.n_calls)} "
-            f"tokens of conversation on average."))
+        item(L("średnio na wywołanie", "average per call"), fmt_tok(stats.weighted / stats.n_calls),
+             L(f"ważonych; śr. kontekst {fmt_tok(ctx_tokens / stats.n_calls)}",
+               f"weighted; avg context {fmt_tok(ctx_tokens / stats.n_calls)}"))
 
 
 def _token_types(out: _Lines, stats: Stats) -> None:
@@ -142,27 +120,21 @@ def _token_types(out: _Lines, stats: Stats) -> None:
                 f"{'x' + format(TYPE_WEIGHTS[t], 'g'):>8}{fmt_tok(w_t[t]):>10}"
                 f"{pct(w_t[t], total):>6.1f}%")
     out.add(f" {L('RAZEM', 'TOTAL'):<26}{fmt_tok(raw):>9}{'':>7}{'':>8}{fmt_tok(stats.weighted):>10}")
-    out.note(L(
-        "Surowe i ważone to te same tokeny policzone na dwa sposoby. Odczyt z cache to prawie "
-        "wszystkie surowe tokeny, ale z wagą x0.1 jego udział w limicie jest dużo mniejszy. "
-        "Ważone uwzględniają też wagę modelu (tabela MODELE), dlatego nie są dokładnie "
-        "surowe × waga.",
-        "Raw and weighted are the same tokens counted two ways. Cache reads are almost all raw "
-        "tokens, but at x0.1 their share of the limit is much smaller. Weighted also includes "
-        "the model's weight (see MODELS), so it is not exactly raw × weight."))
+    out.note(L("Ważone uwzględniają też wagę modelu (tabela MODELE).",
+               "Weighted also includes the model's weight (see MODELS)."))
 
 
 def _groups(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
     total = stats.weighted
     _breakdown(out, L("NA CO IDĄ TOKENY", "WHERE THE TOKENS GO"), stats.by_activity, total,
-               ctx.top + 6, L("czynność", "activity"), activity_name, n_label=L("użyć", "uses"),
+               TOP_ROWS + 6, L("czynność", "activity"), activity_name, n_label=L("użyć", "uses"),
                desc=L("Każde wywołanie jest przypisane do narzędzia, którego model w nim użył (przy "
                       "kilku narzędziach naraz — po równo). „Bez narzędzia” = model odpowiedział Ci "
                       "tekstem. „śr./szt.” = ile średnio waży jedno użycie.",
                       "Each call is assigned to the tool the model used in it (split evenly if it "
                       "used several). 'No tool' = the model replied to you with text. 'avg' = the "
                       "average weight of one use."))
-    _breakdown(out, L("MODELE", "MODELS"), stats.by_model, total, ctx.top, "model",
+    _breakdown(out, L("MODELE", "MODELS"), stats.by_model, total, TOP_ROWS, "model",
                extra=(L("waga", "weight"), lambda k: "x" + format(model_weight(k), ".2g")),
                desc=L("„waga” = jak mocno model obciąża limit względem Opus 5 (x1). Ta sama praca "
                       "na modelu z wagą x0.4 zużywa 2.5 raza mniej.",
@@ -170,7 +142,7 @@ def _groups(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
                       "The same work on a x0.4 model uses 2.5 times less."))
     if unknown_models():
         out.note(L("nieznane modele liczone z wagą Opus 5: ", "unknown models weighted as Opus 5: ")
-                 + ", ".join(unknown_models()) + L(" (zmień przez --prices)", " (use --prices)"))
+                 + ", ".join(unknown_models()))
     _breakdown(out, L("SESJA GŁÓWNA vs SUBAGENCI", "MAIN SESSION vs SUBAGENTS"), stats.by_side,
                total, 2, L("gdzie", "where"), side_name,
                desc=L("Subagenci to osobne instancje Claude uruchamiane narzędziem Agent. Mają "
@@ -179,10 +151,10 @@ def _groups(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
                       "have their own context, so their work doesn't grow the main conversation."))
     if stats.by_agent_type:
         _breakdown(out, L("SUBAGENCI WG TYPU", "SUBAGENTS BY TYPE"), stats.by_agent_type, total,
-                   ctx.top, L("typ subagenta", "subagent type"))
+                   TOP_ROWS, L("typ subagenta", "subagent type"))
     if not ctx.session:
         _breakdown(out, L("PROJEKTY (katalog roboczy)", "PROJECTS (working directory)"),
-                   stats.by_project, total, ctx.top, L("projekt", "project"), left=True)
+                   stats.by_project, total, TOP_ROWS, L("projekt", "project"), left=True)
 
 
 def _context_length(out: _Lines, stats: Stats) -> None:
@@ -196,14 +168,14 @@ def _context_length(out: _Lines, stats: Stats) -> None:
         "Context = the whole conversation the model reads in a call. It grows with every step "
         "and the model re-reads it every time, so the longer the conversation, the more each "
         "further call weighs."))
-    out.add(f" {L('kontekst', 'context'):<14}{L('wywoł.', 'calls'):>8}{L('ważone', 'weighted'):>10}"
-            f"{'%':>7}{L('śr./wywoł.', 'avg/call'):>12}{L('w tym czytanie', 'of it reading'):>16}")
+    out.add(f" {L('kontekst', 'context'):<14}{L('wywoł.', 'calls'):>8}{L('surowe', 'raw'):>10}"
+            f"{L('ważone', 'weighted'):>10}{'%':>7}{L('śr./wywoł.', 'avg/call'):>12}{L('w tym czytanie', 'of it reading'):>16}")
     for _, _, name in CTX_BUCKETS:
         b = stats.by_context[name]
         if not b.calls:
             continue
         few = L("  (mało danych)", "  (few calls)") if b.calls < FEW_CALLS else ""
-        out.add(f" {name:<14}{b.calls:>8}{fmt_tok(b.weighted):>10}{pct(b.weighted, total):>6.1f}%"
+        out.add(f" {name:<14}{b.calls:>8}{fmt_tok(b.raw):>10}{fmt_tok(b.weighted):>10}{pct(b.weighted, total):>6.1f}%"
                 f"{fmt_tok(b.weighted / b.calls):>12}{fmt_tok(b.reading / b.calls):>16}{few}")
     growth = ctx_growth(stats)
     if growth:
@@ -218,21 +190,21 @@ def _context_length(out: _Lines, stats: Stats) -> None:
                    f"write everything to the cache."))
 
 
-def _over_time(out: _Lines, stats: Stats, chart: Optional[str]) -> None:
-    kind = "week" if chart == "week" else "day"
+def _over_time(out: _Lines, stats: Stats) -> None:
+    kind = timeline_kind(stats)
     periods = stats.periods(kind)
-    if len(periods) <= 1 and not chart:
+    if not periods:
         return
     total = stats.weighted or 1e-9
     out.header(L("W CZASIE — ", "OVER TIME — ")
                + (L("tygodnie", "weeks") if kind == "week" else L("dni", "days")))
     peak = max(p.weighted for _, p in periods) or 1e-9
-    out.add(f" {L('okres', 'period'):<26}{L('ważone', 'weighted'):>10}{'%':>7}"
-            f"{L('wywoł.', 'calls'):>8}  ")
+    out.add(f" {L('okres', 'period'):<26}{L('surowe', 'raw'):>9}{L('ważone', 'weighted'):>10}"
+            f"{'%':>7}{L('wywoł.', 'calls'):>8}  ")
     for key, p in periods:
-        out.add(f" {key:<26}{fmt_tok(p.weighted):>10}{pct(p.weighted, total):>6.1f}%{p.calls:>8}  "
-                f"{bar(p.weighted / peak, 30)}")
-    if not chart or len(periods) <= 1:
+        out.add(f" {key:<26}{fmt_tok(p.raw):>9}{fmt_tok(p.weighted):>10}"
+                f"{pct(p.weighted, total):>6.1f}%{p.calls:>8}  {bar(p.weighted / peak, 26)}")
+    if len(periods) <= 1:
         return
     top_activities = [k for k, _ in sorted(stats.by_activity.items(),
                                            key=lambda kv: -kv[1].weighted)[:6]]
@@ -250,16 +222,17 @@ def _over_time(out: _Lines, stats: Stats, chart: Optional[str]) -> None:
 def _heaviest_sessions(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
     total = stats.weighted or 1e-9
     out.header(L("NAJCIĘŻSZE ROZMOWY", "HEAVIEST CONVERSATIONS"))
-    out.add(f" {L('sesja', 'session'):<10}{L('projekt', 'project'):<22}{L('ważone', 'weighted'):>9}"
+    out.add(f" {L('sesja', 'session'):<10}{L('projekt', 'project'):<22}{L('surowe', 'raw'):>8}"
+            f"{L('ważone', 'weighted'):>10}"
             f"{'%':>7}{L('wywoł.', 'calls'):>7}{L('maks.ctx', 'max ctx'):>9}"
-            f"{L('subag.', 'sub'):>7}  {L('temat (pierwsza prośba)', 'topic (first request)')}")
-    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.top]:
+            f"{L('subag.', 'sub'):>7}  {L('temat', 'topic')}")
+    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:TOP_ROWS]:
         meta = ctx.sessions.get(key)
         project = ctx.namer.project(meta, key[0])
         topic = ctx.namer.topic(meta.topic if meta else None)
-        out.add(f" {key[1][:8]:<10}{short(project, 21):<22}{fmt_tok(s.weighted):>9}"
+        out.add(f" {key[1][:8]:<10}{short(project, 21):<22}{fmt_tok(s.raw):>8}{fmt_tok(s.weighted):>10}"
                 f"{pct(s.weighted, total):>6.1f}%{s.calls:>7}{fmt_tok(s.max_context):>9}"
-                f"{pct(s.subagent_weighted, s.weighted):>6.0f}%  {topic[:38]}")
+                f"{pct(s.subagent_weighted, s.weighted):>6.0f}%  {topic[:30]}")
     out.note(L("„maks.ctx” = do jakiego rozmiaru urosła rozmowa; „subag.” = jaka część "
                "zużycia tej sesji przypadła na subagentów. Szczegóły jednej sesji: "
                "--session <id>",
@@ -276,11 +249,12 @@ def _session_phases(out: _Lines, ctx: ReportContext) -> None:
         until = prompts[i + 1].time if i + 1 < len(prompts) else None
         calls = [c for c in ctx.calls if c.time >= prompt.time and (until is None or c.time < until)]
         weighted = sum(c.weighted for c in calls)
+        raw = sum(c.raw for c in calls)
         max_ctx = max((c.context for c in calls if not c.is_subagent), default=0)
         tag = L("powiad.", "notif.") if prompt.kind == "notif" else L("prośba", "request")
         out.add(f" {prompt.time.astimezone():%m-%d %H:%M}  {tag:<8}{len(calls):>5} "
-                f"{L('wyw.', 'calls')}{fmt_tok(weighted):>8}  ctx {fmt_tok(max_ctx):>5}  "
-                f"{ctx.namer.topic(prompt.text)[:44]}")
+                f"{L('wyw.', 'calls')}{fmt_tok(raw):>8} {L('sur.', 'raw')}{fmt_tok(weighted):>7} "
+                f"{L('waż.', 'wt.')}  ctx {fmt_tok(max_ctx):>5}  {ctx.namer.topic(prompt.text)[:30]}")
 
 
 def _expired_cache(out: _Lines, stats: Stats) -> None:
@@ -330,7 +304,7 @@ def text_report(stats: Stats, ctx: ReportContext) -> str:
     _token_types(out, stats)
     _groups(out, stats, ctx)
     _context_length(out, stats)
-    _over_time(out, stats, ctx.chart)
+    _over_time(out, stats)
     if ctx.session:
         _session_phases(out, ctx)
     else:
@@ -415,7 +389,8 @@ def text_daily(rows: List[DayRow]) -> str:
     out = _Lines()
     out.header(L("DZIEŃ PO DNIU — zmiana względem poprzedniego dnia",
                  "DAY BY DAY — change vs the previous day"))
-    out.add(f" {L('dzień', 'day'):<17}{L('ważone', 'weighted'):>9}{L('zmiana', 'change'):>10}{'%':>7}"
+    out.add(f" {L('dzień', 'day'):<17}{L('surowe', 'raw'):>9}{L('ważone', 'weighted'):>11}"
+            f"{L('zmiana', 'change'):>10}{'%':>7}"
             f"{L('wywoł.', 'calls'):>8}{'cache':>7}{L('śr./wyw.', 'avg/call'):>10}  "
             f"{L('największa zmiana', 'biggest change')}")
     for r in rows:
@@ -424,16 +399,17 @@ def text_daily(rows: List[DayRow]) -> str:
         hit = f"{r.cache_hit:.0f}%" if r.cache_hit is not None else "-"
         per_call = fmt_tok(r.per_call) if r.per_call is not None else "-"
         if prev is None or r.is_base:
-            out.add(f" {name:<17}{fmt_tok(day.weighted):>9}{'':>10}{'':>7}{day.calls:>8}"
+            out.add(f" {name:<17}{fmt_tok(day.raw):>9}{fmt_tok(day.weighted):>11}{'':>10}{'':>7}{day.calls:>8}"
                     f"{hit:>7}{per_call:>10}")
             continue
         driver = ""
         if r.driver and abs(r.driver[1]) >= 1:
             driver = f"{fmt_delta(r.driver[1])} {activity_name(r.driver[0])}"
-        out.add(f" {name:<15}{arrow(day.weighted, prev.weighted):>2}{fmt_tok(day.weighted):>9}"
+        out.add(f" {name:<17}{fmt_tok(day.raw):>9}{arrow(day.weighted, prev.weighted):>2}"
+                f"{fmt_tok(day.weighted):>9}"
                 f"{fmt_delta(day.weighted - prev.weighted):>10}"
                 f"{fmt_change(day.weighted, prev.weighted):>7}{day.calls:>8}{hit:>7}"
-                f"{per_call:>10}  {driver[:44]}")
+                f"{per_call:>10}  {driver[:40]}")
     summary = daily_summary(rows)
     if summary:
         hi, lo = summary.highest, summary.lowest
@@ -444,10 +420,10 @@ def text_daily(rows: List[DayRow]) -> str:
                         f"daily average {fmt_tok(summary.average)}   highest {hi.date} "
                         f"({fmt_tok(hi.day.weighted)})   lowest {lo.date} "
                         f"({fmt_tok(lo.day.weighted)})   days ▲ {summary.up} / ▼ {summary.down}"))
-        out.note(L("Wszystko w tokenach ważonych. ▲ = więcej niż dzień wcześniej, ▼ = mniej, "
+        out.note(L("Zmiany w tokenach ważonych. ▲ = więcej niż dzień wcześniej, ▼ = mniej, "
                    "= bez zmian (±1%). „największa zmiana” = czynność, której zużycie zmieniło "
                    "się najbardziej.",
-                   "All in weighted tokens. ▲ = more than the day before, ▼ = less, = unchanged "
+                   "Changes in weighted tokens. ▲ = more than the day before, ▼ = less, = unchanged "
                    "(±1%). 'biggest change' = the activity whose usage changed the most."))
     return out.render()
 

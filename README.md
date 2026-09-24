@@ -46,7 +46,6 @@ python3 claude_token_report.py --days 14 --daily         # last 14 days + each d
 python3 claude_token_report.py --date 2026-09-15         # one specific day
 python3 claude_token_report.py --from 09-01 --to 09-15   # a date range (inclusive)
 python3 claude_token_report.py --today --diff   # today vs yesterday
-python3 claude_token_report.py --days 30 --chart week
 python3 claude_token_report.py -l pl            # Polish
 python3 claude_token_report.py --list           # recent sessions
 python3 claude_token_report.py --session 1a2b   # one session, usage per request
@@ -73,7 +72,7 @@ behind subscription limits, so the report assumes limits count tokens in the sam
 approximation, not an official number. Run `--explain` for the full explanation with a worked example.
 
 The weights live in the price table in `token_report/pricing.py` (as of 2026-09). Only the ratios matter.
-You can override them with `--prices my.json`, for example `{"opus-5": [5, 25, 0.5]}` (input, output, cache read).
+Models missing from the table are counted as Opus 5 (the report lists them).
 
 ## Development
 

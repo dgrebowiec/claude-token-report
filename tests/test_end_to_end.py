@@ -126,7 +126,7 @@ class EndToEndTest(unittest.TestCase):
                                stats.weighted)
 
     def test_text_report(self):
-        out = self.run_cli("--all", "--daily", "--chart")
+        out = self.run_cli("--all", "--daily")
         self.assertIn("CLAUDE CODE TOKEN USAGE — all history", out)
         self.assertIn("DAY BY DAY", out)
         self.assertIn("fix the login bug", out)

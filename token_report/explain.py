@@ -95,7 +95,7 @@ CO ZNACZĄ LICZBY W TYM RAPORCIE
 
 Raport czyta wyłącznie lokalne pliki ~/.claude/projects/**/*.jsonl,
 niczego nie wysyła i nie zużywa tokenów. Wagi: tabela cen w pliku
-token_report/pricing.py (stan 2026-09); zmienisz je opcją --prices plik.json.
+token_report/pricing.py (stan 2026-09).
 """
 
 EXPLAIN_EN = """\
@@ -190,7 +190,7 @@ WHAT THE NUMBERS IN THIS REPORT MEAN
 
 The report reads only local files ~/.claude/projects/**/*.jsonl, sends
 nothing and uses no tokens. Weights: the price table in
-token_report/pricing.py (as of 2026-09); override with --prices file.json.
+token_report/pricing.py (as of 2026-09).
 """
 
 

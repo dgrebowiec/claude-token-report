@@ -7,13 +7,13 @@ import os
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .classify import activity_name
-from .context import ReportContext
+from .context import TOP_ROWS, ReportContext
 from .daily import DayRow, daily_summary
 from .explain import explain_text
 from .formatting import arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, pct, side_name
 from .i18n import L, get_lang, weekday
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
-from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth
+from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
 from .tips import tips
 from .tooltips import help_mark as qm
 
@@ -45,6 +45,10 @@ def _weighted_h() -> str:
     return L("ważone", "weighted")
 
 
+def _raw_h() -> str:
+    return f"{L('surowe', 'raw')}{qm('raw')}"
+
+
 def _calls_h() -> str:
     return L("wywoł.", "calls")
 
@@ -65,12 +69,14 @@ def _breakdown_table(groups: Mapping[str, Bucket], total: float, label: str,
     rows = "".join(
         f"<tr><td class=l>{E(str(names(k)))}</td>"
         + (f"<td class=n>{extra[1](k)}</td>" if extra else "")
-        + f"<td class=n>{fmt_tok(b.weighted)}</td><td class=n>{pct(b.weighted, total):.1f}%</td>"
+        + f"<td class=n>{fmt_tok(b.raw)}</td><td class=n>{fmt_tok(b.weighted)}</td>"
+        f"<td class=n>{pct(b.weighted, total):.1f}%</td>"
         f"<td class=n>{b.calls}</td><td class=n>{fmt_tok(b.weighted / b.calls if b.calls else 0)}"
         f"</td><td class=b><span style='width:{100 * b.weighted / peak:.1f}%'"
         f" title='{E(str(names(k)))}: {fmt_tok(b.weighted)}'></span></td></tr>"
         for k, b in items)
-    return (f"<div class=wrap><table><tr><th>{E(label)}</th>{extra_head}<th class=n>{_weighted_h()}"
+    return (f"<div class=wrap><table><tr><th>{E(label)}</th>{extra_head}<th class=n>{_raw_h()}</th>"
+            f"<th class=n>{_weighted_h()}"
             f"{qm('weighted')}</th><th class=n>%</th><th class=n>{n_label or _calls_h()}"
             f"{qm(n_key)}</th><th class=n>{L('śr.', 'avg')}{qm('avg')}</th><th></th></tr>"
             f"{rows}</table></div>")
@@ -135,7 +141,7 @@ def _daily(rows: Optional[List[DayRow]]) -> str:
         if prev is None or r.is_base:
             tag = f" <small>({L('baza', 'base')})</small>" if r.is_base else ""
             trs.append(f"<tr class=base><td class=l>{name}{tag}</td><td class=n>"
-                       f"{fmt_tok(day.weighted)}</td><td></td><td></td><td></td>"
+                       f"{fmt_tok(day.raw)}</td><td class=n>{fmt_tok(day.weighted)}</td><td></td><td></td><td></td>"
                        f"<td class=n>{day.calls}</td><td class=n>{hit}</td>"
                        f"<td class=n>{per_call}</td><td></td></tr>")
             continue
@@ -150,7 +156,8 @@ def _daily(rows: Optional[List[DayRow]]) -> str:
             key, change = r.driver
             driver = (f"<span class={'up' if change > 0 else 'down'}>{fmt_delta(change)}</span> "
                       f"{E(activity_name(key))}")
-        trs.append(f"<tr><td class=l>{name}</td><td class=n>{fmt_tok(day.weighted)}</td>"
+        trs.append(f"<tr><td class=l>{name}</td><td class=n>{fmt_tok(day.raw)}</td>"
+                   f"<td class=n>{fmt_tok(day.weighted)}</td>"
                    f"<td class='n {cls}'>{ar} {fmt_delta(delta)}</td>"
                    f"<td class='n {cls}'>{fmt_change(day.weighted, prev.weighted)}</td>"
                    f"<td>{delta_bar}</td><td class=n>{day.calls}</td><td class=n>{hit}</td>"
@@ -170,7 +177,8 @@ def _daily(rows: Optional[List[DayRow]]) -> str:
             f"{summary.down}</span></b><span>{L('dni wzrostu · spadku', 'days up · down')}"
             f"</span></div></div>")
     return (f"<h2>{L('Dzień po dniu', 'Day by day')}{qm('daily')}</h2>{cards}"
-            f"<div class=wrap><table class=daily><tr><th>{L('dzień', 'day')}</th><th class=n>"
+            f"<div class=wrap><table class=daily><tr><th>{L('dzień', 'day')}</th>"
+            f"<th class=n>{_raw_h()}</th><th class=n>"
             f"{_weighted_h()}{qm('weighted')}</th><th class=n>{L('zmiana', 'change')}"
             f"</th><th class=n>%</th><th>{L('wzrost / spadek', 'up / down')}</th><th class=n>"
             f"{_calls_h()}{qm('calls')}</th><th class=n>cache{qm('hit')}</th>"
@@ -215,11 +223,11 @@ def _legend() -> str:
                    for k, v in _type_labels().items())
 
 
-def _time_chart(stats: Stats, chart: Optional[str]) -> str:
+def _time_chart(stats: Stats) -> str:
     """SVG bars: weighted tokens per day/week, stacked by token type"""
-    kind = "week" if chart == "week" else "day"
+    kind = timeline_kind(stats)
     periods = stats.periods(kind)
-    if len(periods) <= 1:
+    if not periods:
         return ""
     labels = _type_labels()
     peak = max(p.weighted for _, p in periods) or 1e-9
@@ -247,7 +255,8 @@ def _time_chart(stats: Stats, chart: Optional[str]) -> str:
             y0 -= h
         parts.append(f"<rect x={pad_left + i * bar_w:.1f} y=0 width={bar_w:.1f} "
                      f"height={height - pad_bottom} fill=transparent><title>{E(key)}: "
-                     f"{fmt_tok(p.weighted)} {L('ważonych', 'weighted')}, {p.calls} "
+                     f"{fmt_tok(p.weighted)} {L('ważonych', 'weighted')}, {fmt_tok(p.raw)} "
+                     f"{L('surowych', 'raw')}, {p.calls} "
                      f"{L('wywołań', 'calls')}</title></rect>")
         if n <= 16 or i % max(1, n // 12) == 0:
             label = key[5:10] if kind == "day" else key[5:8]
@@ -298,6 +307,7 @@ def _context_length(stats: Stats) -> str:
         few = f" <span class=few>({L('mało danych', 'few calls')})</span>" \
             if b.calls < FEW_CALLS else ""
         rows += (f"<tr><td class=l>{name}{few}</td><td class=n>{b.calls}</td>"
+                 f"<td class=n>{fmt_tok(b.raw)}</td>"
                  f"<td class=n>{fmt_tok(b.weighted)}</td><td class=n>{pct(b.weighted, total):.1f}%</td>"
                  f"<td class=n>{fmt_tok(b.weighted / b.calls)}</td>"
                  f"<td class=n>{fmt_tok(b.reading / b.calls)}</td></tr>")
@@ -315,8 +325,8 @@ def _context_length(stats: Stats) -> str:
     return "\n".join([
         f"<h2>{L('Długość rozmowy', 'Conversation length')}{qm('length')}</h2>",
         f"<div class=wrap><table><tr><th>{L('kontekst', 'context')}</th><th class=n>{_calls_h()}"
-        f"</th><th class=n>{_weighted_h()}{qm('weighted')}</th><th class=n>%</th>"
-        f"<th class=n>{L('śr./wywoł.', 'avg/call')}{qm('avgcall')}</th>"
+        f"</th><th class=n>{_raw_h()}</th><th class=n>{_weighted_h()}{qm('weighted')}</th>"
+        f"<th class=n>%</th><th class=n>{L('śr./wywoł.', 'avg/call')}{qm('avgcall')}</th>"
         f"<th class=n>{L('w tym czytanie', 'of it reading')}{qm('reading')}</th></tr>{rows}"
         f"</table></div>",
         growth_note,
@@ -328,18 +338,20 @@ def _heaviest_sessions(stats: Stats, ctx: ReportContext) -> str:
         return ""
     total = stats.weighted or 1e-9
     rows = ""
-    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.top + 5]:
+    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:TOP_ROWS + 5]:
         meta = ctx.sessions.get(key)
         topic = ctx.namer.topic(meta.topic if meta else None)
         rows += (
             f"<tr><td class=m>{E(key[1][:8])}</td><td>{E(ctx.namer.project(meta, key[0]))}"
-            f"</td><td class=n>{fmt_tok(s.weighted)}</td><td class=n>{pct(s.weighted, total):.1f}%"
+            f"</td><td class=n>{fmt_tok(s.raw)}</td><td class=n>{fmt_tok(s.weighted)}</td>"
+            f"<td class=n>{pct(s.weighted, total):.1f}%"
             f"</td><td class=n>{s.calls}</td><td class=n>{fmt_tok(s.max_context)}</td>"
             f"<td class=n>{pct(s.subagent_weighted, s.weighted):.0f}%</td>"
             f"<td class=t>{E(topic[:100])}</td></tr>")
     return (f"<h2>{L('Najcięższe rozmowy', 'Heaviest conversations')}{qm('sessions')}</h2>"
             f"<div class=wrap><table><tr><th>{L('sesja', 'session')}</th><th>"
-            f"{L('projekt', 'project')}</th><th class=n>{_weighted_h()}{qm('weighted')}</th>"
+            f"{L('projekt', 'project')}</th><th class=n>{_raw_h()}</th>"
+            f"<th class=n>{_weighted_h()}{qm('weighted')}</th>"
             f"<th class=n>%</th><th class=n>{_calls_h()}</th><th class=n>"
             f"{L('maks. ctx', 'max ctx')}{qm('maxctx')}</th><th class=n>{L('subag.', 'sub')}"
             f"{qm('subshare')}</th><th>{L('temat', 'topic')}</th></tr>{rows}</table></div>")
@@ -391,7 +403,7 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         _comparison(stats, prev, ctx),
         _daily(daily),
         _token_types(stats),
-        _time_chart(stats, ctx.chart),
+        _time_chart(stats),
         _groups(stats, ctx),
         _context_length(stats),
         _heaviest_sessions(stats, ctx),

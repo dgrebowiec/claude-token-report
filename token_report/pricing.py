@@ -7,7 +7,6 @@ ratios below matter, not the money.
 """
 from __future__ import annotations
 
-import json
 from typing import Dict, List, Mapping, Set, Tuple
 
 from .i18n import L
@@ -21,7 +20,7 @@ TYPE_WEIGHTS = {"input": W_INPUT, "cache_read": W_CACHE_READ, "cache_write_5m": 
 Price = Tuple[float, float, float]  # input, output, cache read — per 1M tokens
 
 # Relative API prices: (substring of model id, input, output, cache read).
-# Checked in order — more specific names first. Override with --prices FILE.
+# Checked in order — more specific names first.
 _PRICES: List[Tuple[str, float, float, float]] = [
     ("fable-5-1", 10.0, 50.0, 0.25),
     ("mythos-5-1", 10.0, 50.0, 0.25),
@@ -63,14 +62,6 @@ def model_weight(model: str) -> float:
 def unknown_models() -> List[str]:
     """models seen so far that are not in the price table (weighted as Opus 5)"""
     return sorted(_unknown_models)
-
-
-def load_price_overrides(path: str) -> None:
-    """JSON: {"model-substring": [input, output, cache_read], ...} — checked before the table."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    extra = [(k.lower(), float(v[0]), float(v[1]), float(v[2])) for k, v in data.items()]
-    _PRICES[:0] = extra
 
 
 def type_name(token_type: str) -> str:

@@ -20,6 +20,7 @@ LONG_CTX_BUCKETS = ("200-300k", "300k+")
 MIN_REBUILD_CTX = 20000
 FEW_CALLS = 30  # groups with fewer calls are marked as unreliable
 TOP_REBUILDS = 5
+MAX_TIMELINE_DAYS = 31  # longer periods are shown by week
 
 _EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
@@ -27,10 +28,12 @@ _EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 @dataclass
 class Bucket:
     weighted: float = 0.0
+    raw: float = 0.0
     calls: int = 0
 
-    def add(self, weighted: float) -> None:
+    def add(self, weighted: float, raw: float) -> None:
         self.weighted += weighted
+        self.raw += raw
         self.calls += 1
 
 
@@ -52,10 +55,15 @@ class Period:
         for key, share in activities:
             self.activities[key] += call.weighted * share
 
+    @property
+    def raw(self) -> int:
+        return sum(self.tokens.values())
+
 
 @dataclass
 class ContextBucket:
     weighted: float = 0.0
+    raw: float = 0.0
     calls: int = 0
     reading: float = 0.0  # weighted tokens spent just on reading the conversation
 
@@ -63,6 +71,7 @@ class ContextBucket:
 @dataclass
 class SessionStats:
     weighted: float = 0.0
+    raw: float = 0.0
     calls: int = 0
     subagent_weighted: float = 0.0
     max_context: int = 0  # of the main conversation
@@ -133,6 +142,11 @@ class Stats:
         return sum(self.by_context[k].weighted for k in LONG_CTX_BUCKETS)
 
 
+def timeline_kind(stats: Stats) -> str:
+    """the timeline goes by day, or by week when there are too many days to read"""
+    return "week" if len(stats.by_day) > MAX_TIMELINE_DAYS else "day"
+
+
 def week_key(loc: datetime.datetime) -> str:
     y, w, _ = loc.isocalendar()
     monday = loc.date() - datetime.timedelta(days=loc.weekday())
@@ -174,20 +188,20 @@ def aggregate(calls: List[Call], sessions: Mapping[SessionKey, SessionMeta],
 
 def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMeta],
               namer: Namer) -> None:
-    w = call.weighted
+    w, raw = call.weighted, call.raw
     stats.weighted += w
     stats.tokens.update(call.tokens)
     stats.weighted_by_type.update(call.weighted_by_type)
 
     activities = call_activities(call)
     for key, share in activities:
-        stats.by_activity[key].add(w * share)
-    stats.by_model[call.model].add(w)
+        stats.by_activity[key].add(w * share, raw * share)
+    stats.by_model[call.model].add(w, raw)
     project = namer.project(sessions.get(call.session_key), call.session_key[0])
-    stats.by_project[project].add(w)
-    stats.by_side["sub" if call.is_subagent else "main"].add(w)
+    stats.by_project[project].add(w, raw)
+    stats.by_side["sub" if call.is_subagent else "main"].add(w, raw)
     if call.is_subagent:
-        stats.by_agent_type[call.agent_type or L("(nieznany typ)", "(unknown type)")].add(w)
+        stats.by_agent_type[call.agent_type or L("(nieznany typ)", "(unknown type)")].add(w, raw)
 
     loc = call.time.astimezone()
     day = stats.by_day[f"{loc:%Y-%m-%d} {weekday(loc.date())}"]
@@ -201,12 +215,14 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
         if lo <= call.context < hi:
             b = stats.by_context[name]
             b.weighted += w
+            b.raw += raw
             b.calls += 1
             b.reading += call.weighted_by_type["cache_read"] + call.weighted_by_type["input"]
             break
 
     s = stats.by_session[call.session_key]
     s.weighted += w
+    s.raw += raw
     s.calls += 1
     if call.is_subagent:
         s.subagent_weighted += w

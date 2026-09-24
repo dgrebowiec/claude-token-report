@@ -7,13 +7,13 @@ from typing import Dict, List, Optional
 from .naming import Namer
 from .transcripts import Call, SessionKey, SessionMeta
 
+TOP_ROWS = 10  # rows in the ranking tables
+
 
 @dataclass
 class ReportContext:
     label: str  # the period, e.g. "last 7 days (...)"
     root_display: str  # transcripts directory as shown to the user
-    top: int  # rows per table
-    chart: Optional[str]  # None, "day" or "week"
     sessions: Dict[SessionKey, SessionMeta]
     namer: Namer
     calls: List[Call] = field(default_factory=list)  # the calls inside the period

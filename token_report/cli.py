@@ -17,7 +17,6 @@ from .i18n import L
 from .naming import Namer
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
-from .pricing import load_price_overrides
 from .report_html import html_report
 from .report_text import session_list, text_daily, text_diff, text_report
 from .stats import aggregate
@@ -59,7 +58,6 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s -l pl --date 2026-09-15       jeden konkretny dzień\n"
             "  %(prog)s -l pl --from 09-01 --to 09-15 --daily   zakres dat, dzień po dniu\n"
             "  %(prog)s -l pl --today --diff          dzisiaj vs wczoraj\n"
-            "  %(prog)s -l pl --days 30 --chart week  30 dni, oś czasu tygodniami\n"
             "  %(prog)s -l pl --list                  ostatnie sesje\n"
             "  %(prog)s -l pl --session 1a2b3c        jedna sesja z fazami (id lub prefiks)\n"
             "  %(prog)s -l pl --html raport.html --daily --private   HTML do udostępnienia\n\n"
@@ -71,7 +69,6 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s --date 2026-09-15             one specific day\n"
             "  %(prog)s --from 09-01 --to 09-15 --daily   a date range, day by day\n"
             "  %(prog)s --today --diff                today vs yesterday\n"
-            "  %(prog)s --days 30 --chart week        30 days, timeline by week\n"
             "  %(prog)s --list                        recent sessions\n"
             "  %(prog)s --session 1a2b3c              one session with its phases (id or prefix)\n"
             "  %(prog)s --html report.html --daily --private   shareable HTML\n"
@@ -108,10 +105,6 @@ def build_parser() -> argparse.ArgumentParser:
                           "one session (id/prefix; no value = latest)"))
     g.add_argument("--list", metavar="N", nargs="?", type=int, const=15,
                    help=L("pokaż ostatnie sesje", "list recent sessions"))
-    g.add_argument("--chart", nargs="?", const="day", choices=["day", "week"],
-                   help=L("oś czasu wg dni/tygodni z trendem czynności",
-                          "timeline by day/week with activity trend"))
-    g.add_argument("--top", type=int, default=10, help=L("wierszy w tabelach (10)", "rows per table (10)"))
     g = ap.add_argument_group(L("wyjście", "output"))
     g.add_argument("--html", metavar=L("PLIK", "FILE"), help=L("zapisz raport HTML", "write an HTML report"))
     g.add_argument("--private", action="store_true",
@@ -125,9 +118,6 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--dir", metavar=L("KATALOG", "DIR"),
                    help=L("katalog transkryptów (domyślnie ~/.claude/projects)",
                           "transcripts dir (default ~/.claude/projects)"))
-    g.add_argument("--prices", metavar="JSON",
-                   help=L('własne wagi modeli jako ceny API: {"nazwa-modelu": [wejście, wyjście, odczyt_cache]}',
-                          'custom model weights as API prices: {"model-substring": [input, output, cache_read]}'))
     return ap
 
 
@@ -175,8 +165,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if not os.path.isdir(root):
         sys.exit(L(f"brak katalogu {root} — czy Claude Code był tu używany? (--dir)",
                    f"no directory {root} — has Claude Code been used here? (--dir)"))
-    if args.prices:
-        load_price_overrides(args.prices)
     namer = Namer(args.private)
 
     if args.list:
@@ -210,7 +198,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if session_key:
         label += "  (" + namer.project(sessions.get(session_key), session_key[0]) + ")"
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
-                        top=args.top, chart=args.chart, sessions=sessions, namer=namer,
+                        sessions=sessions, namer=namer,
                         calls=current, session=args.session, session_key=session_key)
     stats = aggregate(current, sessions, namer)
     prev_stats = None
