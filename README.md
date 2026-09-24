@@ -308,6 +308,13 @@ approximation, not an official number. Run `--explain` for the full explanation 
 The weights live in the price table in `token_report/pricing.py` (as of 2026-09). Only the ratios matter.
 Models missing from the table are counted as Opus 5 (the report lists them).
 
+Official sources for the prices and the cache durations (5 minutes / 1 hour):
+
+- [Pricing](https://platform.claude.com/docs/en/about-claude/pricing): per-model prices, including
+  5-minute cache writes (1.25x input), 1-hour cache writes (2x) and cache reads (0.1x)
+- [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching): how the
+  cache works and how long an entry lives (every read refreshes it)
+
 ## Development
 
 `claude_token_report.py` is only a launcher; the code is in the `token_report/` package:
