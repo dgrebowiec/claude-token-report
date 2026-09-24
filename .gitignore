@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.html
+!examples/*.html
 build/
 *.egg-info/
 dist/
