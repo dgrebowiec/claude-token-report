@@ -63,7 +63,7 @@ CO ZNACZĄ LICZBY W TYM RAPORCIE
 
 6. WAGI MODELI (względem Opus 5)
    Fable 5 / 5.1         x2      Sonnet 4.x          x0.6
-   Opus 5, Opus 4.5-4.8  x1      Sonnet 5            x0.4
+   Opus 5, Opus 4.5-4.8  x1      Sonnet 5 / 5.5      x0.4
    Opus 5.5              x0.8    Haiku 4.5           x0.2
    Ta sama praca na Sonnecie 5 obciąża limit 2.5 raza mniej niż na Opusie 5.
 
@@ -157,7 +157,7 @@ WHAT THE NUMBERS IN THIS REPORT MEAN
 
 6. MODEL WEIGHTS (relative to Opus 5)
    Fable 5 / 5.1         x2      Sonnet 4.x          x0.6
-   Opus 5, Opus 4.5-4.8  x1      Sonnet 5            x0.4
+   Opus 5, Opus 4.5-4.8  x1      Sonnet 5 / 5.5      x0.4
    Opus 5.5              x0.8    Haiku 4.5           x0.2
    The same work on Sonnet 5 uses the limit 2.5 times less than on Opus 5.
 

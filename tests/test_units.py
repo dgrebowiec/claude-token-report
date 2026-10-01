@@ -74,6 +74,7 @@ class PricingTest(unittest.TestCase):
         self.assertAlmostEqual(sum(weighted_by_type(tokens, "claude-opus-5").values()), 15_000)
         self.assertAlmostEqual(sum(weighted_by_type(tokens, "claude-sonnet-5").values()), 6_000)
         self.assertAlmostEqual(model_weight("claude-opus-5-5"), 0.8)
+        self.assertAlmostEqual(model_weight("claude-sonnet-5-5"), 0.4)
         self.assertAlmostEqual(model_weight("claude-haiku-4-5-20251001"), 0.2)
 
 

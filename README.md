@@ -299,7 +299,7 @@ This report is for Claude **subscriptions** (Pro/Max), so it shows no money, onl
 | measure | what it is |
 |---|---|
 | **raw tokens** | all text that went through the model, every token counted the same. The model re-reads the whole conversation on every call, so this is huge and mostly cheap cache reads. |
-| **weighted tokens** | the main measure: each token counted by how heavily it uses your limit. Cache read x0.1, new input x1, cache write x1.25 (5 min) / x2 (1 h), output x5, times the model weight (Opus 5 x1, Opus 5.5 x0.8, Sonnet 5 x0.4, Haiku 4.5 x0.2, Fable 5.x x2). |
+| **weighted tokens** | the main measure: each token counted by how heavily it uses your limit. Cache read x0.1, new input x1, cache write x1.25 (5 min) / x2 (1 h), output x5, times the model weight (Opus 5 x1, Opus 5.5 x0.8, Sonnet 5 / 5.5 x0.4, Haiku 4.5 x0.2, Fable 5.x x2). |
 
 The weights are the price ratios from Anthropic's public API pricing. Anthropic does not publish the formula
 behind subscription limits, so the report assumes limits count tokens in the same proportions. That is an
