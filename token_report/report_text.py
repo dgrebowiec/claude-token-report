@@ -8,8 +8,9 @@ from typing import Callable, List, Mapping, Optional, Tuple
 from .classify import activity_name
 from .context import TOP_ROWS, ReportContext
 from .daily import DayRow, daily_summary
-from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, pct, short,
-                         side_name)
+from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative,
+                         pct, short, side_name)
+from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, Item
 from .i18n import L, weekday
 from .naming import Namer
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
@@ -293,6 +294,80 @@ def _rereads(out: _Lines, stats: Stats) -> None:
         out.add(f"    {name[:50]:<52}+{n}")
 
 
+def _documented(item: Item) -> str:
+    if item.linked:
+        return L("przez link", "via link")
+    if item.documented is None:
+        return "-"
+    return L("tak", "yes") if item.documented else L("nie", "no")
+
+
+def _project_map(out: _Lines, stats: Stats) -> None:
+    if not stats.hotspots and not stats.hotspots_hidden:
+        return
+    out.header(L("MAPA PROJEKTU — czego Claude szuka w kółko",
+                 "PROJECT MAP — what Claude looks up again and again"))
+    if stats.hotspots_hidden:
+        out.note(L("Ukryte z --private (nazwy plików i klas zdradzają projekt).",
+                   "Hidden with --private (file and class names reveal the project)."))
+        return
+    out.note(L(
+        "Pliki i symbole, których Claude szukał w kilku rozmowach. Każda nowa rozmowa odkrywa je "
+        "od zera; jedna linia w CLAUDE.md oszczędza to szukanie. „w CLAUDE.md” = wspomniane w "
+        "CLAUDE.md, jego @importach albo .claude/rules; „przez link” = w pliku .md, do którego "
+        "CLAUDE.md odsyła (np. mapa projektu), więc Claude doczytuje go na żądanie.",
+        "Files and symbols Claude looked up in several conversations. Each new conversation "
+        "finds them from scratch; one line in CLAUDE.md saves that search. 'in CLAUDE.md' = "
+        "mentioned in CLAUDE.md, its @imports or .claude/rules; 'via link' = in a .md file "
+        "CLAUDE.md points to (e.g. a project map), which Claude reads on demand."))
+    in_claude = L("w CLAUDE.md", "in CLAUDE.md")
+    for project in stats.hotspots:
+        out.add()
+        out.add(" " + home_relative(project.root))
+        if project.instructions:
+            out.add("   " + L("instrukcje: ", "instructions: ") + ", ".join(
+                L(f"{f.name} ({f.lines} linii)", f"{f.name} ({f.lines} lines)")
+                for f in project.instructions[:4]))
+        else:
+            out.note(L("Brak CLAUDE.md — uruchom /init w tym projekcie, a potem dopisz mapę "
+                       "z poniższego szkicu.",
+                       "No CLAUDE.md — run /init in this project, then add the map from the "
+                       "draft below."))
+        for f in project.long_instructions():
+            out.note(L(f"{f.name} ma {f.lines} linii i ładuje się w każdej rozmowie (zalecane "
+                       f"< {LONG_INSTRUCTIONS}). Wskazówki dla jednej części kodu przenieś do "
+                       f".claude/rules/ z polem paths:, a procedury do skilli.",
+                       f"{f.name} has {f.lines} lines and loads in every conversation "
+                       f"(advised < {LONG_INSTRUCTIONS}). Move guidance for one part of the "
+                       f"code to .claude/rules/ with a paths: field, and procedures to skills."))
+        if project.files:
+            out.add(f"   {L('plik', 'file'):<52}{L('odczyty', 'reads'):>8}{L('rozm.', 'convs'):>7}"
+                    f"{L('linie', 'lines'):>7}  {in_claude}")
+            for item in project.files:
+                lines = str(item.lines) if item.lines is not None else "-"
+                large = L("  duży", "  large") if (item.lines or 0) >= LARGE_FILE else ""
+                out.add(f"   {short(item.name, 51):<52}{item.uses:>8}{item.sessions:>7}"
+                        f"{lines:>7}  {_documented(item)}{large}")
+        if project.symbols:
+            out.add(f"   {L('symbol', 'symbol'):<52}{L('szukania', 'lookups'):>8}"
+                    f"{L('rozm.', 'convs'):>7}{'':>7}  {in_claude}")
+            for item in project.symbols:
+                out.add(f"   {short(item.name, 51):<52}{item.uses:>8}{item.sessions:>7}{'':>7}"
+                        f"  {_documented(item)}")
+        if any((i.lines or 0) >= LARGE_FILE for i in project.files):
+            out.note(L(f"„duży” = ponad {LARGE_FILE} linii: Claude czyta go kawałkami w każdej "
+                       f"rozmowie. Opisz w CLAUDE.md, co jest w której części, albo podziel plik.",
+                       f"'large' = over {LARGE_FILE} lines: Claude reads it in pieces in every "
+                       f"conversation. Describe in CLAUDE.md what is where in it, or split it."))
+        draft = project.draft()
+        if draft:
+            out.add("   " + L("szkic do CLAUDE.md (uzupełnij „…” jednym zdaniem):",
+                              "draft for CLAUDE.md (replace '…' with one sentence):"))
+            out.add("     " + L("## Mapa projektu", "## Project map"))
+            for line in draft:
+                out.add("     " + line)
+
+
 def text_report(stats: Stats, ctx: ReportContext) -> str:
     out = _Lines()
     out.rule()
@@ -311,6 +386,7 @@ def text_report(stats: Stats, ctx: ReportContext) -> str:
         _heaviest_sessions(out, stats, ctx)
     _expired_cache(out, stats)
     _rereads(out, stats)
+    _project_map(out, stats)
     out.header(L("CO MOŻNA POPRAWIĆ", "WHAT YOU COULD IMPROVE"))
     for tip in tips(stats):
         out.bullet(tip)

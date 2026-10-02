@@ -138,6 +138,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertNotIn("fix the login bug", out)
         self.assertNotIn("myproj", out)
         self.assertIn("project-1", out)
+        self.assertIn("PROJECT MAP", out)
+        self.assertIn("Hidden with --private", out)
 
     def test_polish(self):
         i18n.set_lang("en")

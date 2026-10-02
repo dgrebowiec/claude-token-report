@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from typing import List
 
+import os
+
 from .classify import EXPLORE_KEYS
-from .formatting import pct
+from .formatting import home_relative, pct
+from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS
 from .i18n import L
 from .pricing import model_weight
 from .stats import Stats, ctx_growth
@@ -16,6 +19,7 @@ EXPLORE_PCT = 25
 REREAD_MIN_READS, REREAD_PCT = 20, 20
 OUTPUT_PCT = 35
 TOP_MODEL_PCT, EXPENSIVE_MODEL_WEIGHT = 80, 0.8
+HOTSPOT_TIP_PROJECTS = 2
 
 
 def tips(stats: Stats) -> List[str]:
@@ -59,6 +63,8 @@ def tips(stats: Stats) -> List[str]:
             f"and hand broad searches to a subagent (e.g. \"use a subagent to find…\"). Its "
             f"working reads stay out of the main conversation; only the result comes back."))
 
+    out.extend(_hotspot_tips(stats))
+
     rr = stats.rereads
     if rr.reads >= REREAD_MIN_READS and pct(rr.repeats, rr.reads) > REREAD_PCT:
         out.append(L(
@@ -90,4 +96,46 @@ def tips(stats: Stats) -> List[str]:
     if not out:
         out.append(L("Nic nie odstaje — rozkład zużycia wygląda zdrowo.",
                      "Nothing stands out — the usage distribution looks healthy."))
+    return out
+
+
+def _hotspot_tips(stats: Stats) -> List[str]:
+    out = []
+    for project in stats.hotspots[:HOTSPOT_TIP_PROJECTS]:
+        missing = sorted(project.missing(), key=lambda i: -i.uses)
+        if not missing:
+            continue
+        name = os.path.basename(project.root)
+        examples = ", ".join(f"{os.path.basename(i.name)} ({i.uses}×)" for i in missing[:3])
+        where = (L("nie ma ich w CLAUDE.md", "they are not in CLAUDE.md") if project.instructions
+                 else L("projekt nie ma CLAUDE.md (/init)", "the project has no CLAUDE.md (/init)"))
+        out.append(L(
+            f"{name}: Claude w kilku rozmowach szukał tych samych rzeczy, np. {examples}, a "
+            f"{where}. Krótka mapa projektu oszczędzi to szukanie — szkic jest w sekcji "
+            f"MAPA PROJEKTU.",
+            f"{name}: Claude looked up the same things in several conversations, e.g. "
+            f"{examples}, and {where}. A short project map saves that search — there is a "
+            f"draft in the PROJECT MAP section."))
+
+    large = [(i, p) for p in stats.hotspots for i in p.files if (i.lines or 0) >= LARGE_FILE]
+    if large:
+        item, project = max(large, key=lambda ip: ip[0].uses)
+        name = f"{os.path.basename(item.name)} ({os.path.basename(project.root)})"
+        out.append(L(
+            f"{name} ma {item.lines} linii i był czytany {item.uses} razy w {item.sessions} "
+            f"rozmowach. Tak duży plik Claude czyta kawałkami, szukając właściwego miejsca; "
+            f"podział na mniejsze pliki albo opis jego części w CLAUDE.md skraca te poszukiwania.",
+            f"{name} has {item.lines} lines and was read {item.uses} times in {item.sessions} "
+            f"conversations. Claude reads a file this big in pieces, looking for the right "
+            f"place; splitting it or describing its parts in CLAUDE.md shortens that search."))
+
+    for project in stats.hotspots:
+        for f in project.long_instructions():
+            out.append(L(
+                f"{f.name} w {home_relative(project.root)} ma {f.lines} linii, a ładuje się w "
+                f"każdej rozmowie (zalecane < {LONG_INSTRUCTIONS}). Wskazówki dla jednej części "
+                f"kodu przenieś do .claude/rules/ z polem paths:, a procedury do skilli.",
+                f"{f.name} in {home_relative(project.root)} has {f.lines} lines and loads in "
+                f"every conversation (advised < {LONG_INSTRUCTIONS}). Move guidance for one part "
+                f"of the code to .claude/rules/ with a paths: field, and procedures to skills."))
     return out

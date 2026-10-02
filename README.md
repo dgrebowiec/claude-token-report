@@ -2,7 +2,8 @@
 
 Shows **where your Claude Code tokens actually go**: which activities (reading files, searching,
 editing, git, subagents...), which models, projects and sessions. It also shows how much long
-conversations and an expired cache add to your usage.
+conversations and an expired cache add to your usage, and which files and classes Claude keeps
+looking up in every new conversation, with a draft of what to add to `CLAUDE.md`.
 
 - reads only local transcripts (`~/.claude/projects/**/*.jsonl`)
 - sends nothing and calls no API, so it uses **0 tokens**
@@ -292,6 +293,35 @@ Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM-DD` (current year), `today`, `yesterday`.
 usage per call and the activity that changed the most. It works in the terminal and in the HTML report.
 In the HTML report every metric has a `?` you can hover over or tap for an explanation.
 
+## Project map: what to put in CLAUDE.md
+
+Every new conversation starts without knowing your project, so Claude finds the same files and
+classes again: it greps for `UserManager`, reads the 3000-line `MainActivity.kt` in pieces, and so on.
+The **PROJECT MAP** section lists, for up to three projects:
+
+- **files** Claude read at least 5 times across at least 2 conversations, with their length
+  (`large` = over 800 lines, read in pieces)
+- **symbols** (camelCase / snake_case names) it searched for with Grep, Glob, `grep`, `rg`,
+  `git grep`, `find -name` or `fd`. A `grep` that filters piped output (`git log | grep foo`)
+  is not counted, nor is a search in another directory
+- whether each one is already mentioned in what Claude Code loads as instructions: `CLAUDE.md`,
+  `.claude/CLAUDE.md` and `CLAUDE.local.md` (in the project and above it), their `@imports`,
+  `.claude/rules/`, `~/.claude/CLAUDE.md`, and `AGENTS.md` when there is no `CLAUDE.md`.
+  `via link` means it is in a `.md` file those instructions link to (say, a project map Claude
+  is told to read first), which loads only when Claude reads it
+- a draft to paste into `CLAUDE.md`, one line per missing item; you fill in the `…`:
+
+```markdown
+## Project map
+- `app/src/main/java/com/example/MainActivity.kt` — …
+- `UserManager` — `app/src/main/java/com/example/data/UserManager.kt` — …
+```
+
+It also warns when an instruction file has more than 200 lines: it loads in every conversation,
+and [the Claude Code docs](https://code.claude.com/docs/en/memory) advise keeping it shorter and
+moving guidance for one part of the code to `.claude/rules/` with a `paths:` field.
+With `--private` the section is hidden, since file and class names reveal the project.
+
 ## Two measures
 
 This report is for Claude **subscriptions** (Pro/Max), so it shows no money, only tokens.
@@ -325,6 +355,7 @@ Official sources for the prices and the cache durations (5 minutes / 1 hour):
 | `pricing.py` | token types, model prices and weights |
 | `classify.py` | which activity a call belongs to (tool, kind of shell command) |
 | `stats.py` | aggregates calls into `Stats` (by activity, model, project, day, context size...) |
+| `hotspots.py` | the project map: repeated lookups per project vs. `CLAUDE.md` and rules |
 | `daily.py`, `tips.py` | the `--daily` comparison and the suggestions |
 | `periods.py` | `--days/--date/--from...` time windows |
 | `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |

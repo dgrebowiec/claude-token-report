@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from .transcripts import SessionMeta
 
@@ -11,6 +11,12 @@ _WORKTREE = re.compile(r"^(.*?)[/\\]\.claude[/\\]worktrees[/\\]([^/\\]+)")
 # subagent types that ship with Claude Code; user-defined ones are anonymised with --private
 _BUILTIN_AGENTS = {"general-purpose", "Explore", "Plan", "fork", "claude", "statusline-setup",
                    "claude-code-guide"}
+
+
+def split_worktree(cwd: str) -> Tuple[str, Optional[str]]:
+    """(main checkout, worktree name) of a Claude Code worktree under .claude/worktrees/"""
+    match = _WORKTREE.search(cwd)
+    return (match.group(1), match.group(2)) if match else (cwd, None)
 
 
 class Namer:
@@ -33,10 +39,7 @@ class Namer:
     def _project_path(self, cwd: str) -> str:
         """~-relative working directory; a Claude Code worktree counts as its main project"""
         home = os.path.expanduser("~")
-        worktree = None
-        match = _WORKTREE.search(cwd)
-        if match:
-            cwd, worktree = match.group(1), match.group(2)
+        cwd, worktree = split_worktree(cwd)
         if cwd == home:
             name = "~"
         elif cwd.startswith(home + os.sep):

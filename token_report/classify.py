@@ -1,10 +1,11 @@
 """Which activity a model call belongs to: the tool it used, and for Bash the kind of command."""
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shlex
-from typing import TYPE_CHECKING, Any, List, Mapping, Tuple
+from typing import TYPE_CHECKING, Any, List, Mapping, Sequence, Tuple
 
 from .i18n import L
 
@@ -124,21 +125,25 @@ def _shell_tokens(command: str) -> List[str]:
     return command.split()
 
 
-def _simple_commands(command: str) -> List[List[str]]:
-    """split a shell command on ; && || | and newlines, drop keywords and VAR=... prefixes"""
-    commands, current = [], []
+@functools.lru_cache(maxsize=None)  # the activity split and the project map parse each line
+def _split_commands(command: str) -> Tuple[Tuple[Tuple[str, ...], bool], ...]:
+    """split a shell command on ; && || | and newlines, drop keywords and VAR=... prefixes;
+    (words, reads stdin) — the flag is set for a command fed by a pipe (but not via xargs)"""
+    commands, current, piped, after_pipe = [], [], False, False
     for token in _shell_tokens(command):
         if token and not token.strip(";&|()"):
             if current:
-                commands.append(current)
-            current = []
+                commands.append((current, piped))
+            current, after_pipe = [], token == "|"
         else:
+            if not current:
+                piped = after_pipe
             current.append(token)
     if current:
-        commands.append(current)
+        commands.append((current, piped))
 
     out = []
-    for words in commands:
+    for words, piped in commands:
         words = [w for w in words if w.strip()]
         if not words or words[0] in ("for", "select", "case"):
             continue  # loop header: "for f in a b" — the body comes after "do"
@@ -147,8 +152,17 @@ def _simple_commands(command: str) -> List[List[str]]:
                                   or (i > 0 and (words[i].startswith("-") or words[i].isdigit()))):
             i += 1
         if i < len(words):
-            out.append(words[i:])
-    return out
+            out.append((tuple(words[i:]), piped and words[0] != "xargs"))
+    return tuple(out)
+
+
+def _simple_commands(command: str) -> List[Sequence[str]]:
+    return [words for words, _ in _split_commands(command)]
+
+
+def file_commands(command: Any) -> List[Sequence[str]]:
+    """the simple commands of a shell line that work on files rather than on piped input"""
+    return [words for words, piped in _split_commands(str(command or "")) if not piped]
 
 
 def classify_bash(command: Any) -> str:

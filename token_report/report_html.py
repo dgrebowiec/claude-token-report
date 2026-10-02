@@ -10,7 +10,9 @@ from .classify import activity_name
 from .context import TOP_ROWS, ReportContext
 from .daily import DayRow, daily_summary
 from .explain import explain_text
-from .formatting import arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, pct, side_name
+from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative, pct,
+                         side_name)
+from .hotspots import LARGE_FILE, Item, ProjectHotspots
 from .i18n import L, get_lang, weekday
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
 from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
@@ -370,6 +372,63 @@ def _cache_and_repeats(stats: Stats) -> str:
     ])
 
 
+def _documented(item: Item) -> str:
+    if item.linked:
+        return L("przez link", "via link")
+    if item.documented is None:
+        return "–"
+    return L("tak", "yes") if item.documented else f"<b>{L('nie', 'no')}</b>"
+
+
+def _hotspot_table(project: ProjectHotspots) -> str:
+    in_claude = f"<th>{L('w CLAUDE.md', 'in CLAUDE.md')}</th>"
+    rows = ""
+    if project.files:
+        rows += (f"<tr><th>{L('plik', 'file')}</th><th class=n>{L('odczyty', 'reads')}</th>"
+                 f"<th class=n>{L('rozmowy', 'convs')}</th><th class=n>{L('linie', 'lines')}"
+                 f"</th>{in_claude}</tr>")
+        for i in project.files:
+            large = f" <span class=few>{L('duży', 'large')}</span>" \
+                if (i.lines or 0) >= LARGE_FILE else ""
+            rows += (f"<tr><td class=p>{E(i.name)}</td><td class=n>{i.uses}</td>"
+                     f"<td class=n>{i.sessions}</td><td class=n>"
+                     f"{i.lines if i.lines is not None else '–'}{large}</td>"
+                     f"<td>{_documented(i)}</td></tr>")
+    if project.symbols:
+        rows += (f"<tr><th>{L('symbol', 'symbol')}</th><th class=n>{L('szukania', 'lookups')}"
+                 f"</th><th class=n>{L('rozmowy', 'convs')}</th><th></th>{in_claude}</tr>")
+        for i in project.symbols:
+            rows += (f"<tr><td class=p>{E(i.name)}</td><td class=n>{i.uses}</td>"
+                     f"<td class=n>{i.sessions}</td><td></td><td>{_documented(i)}</td></tr>")
+    return f"<div class=wrap><table>{rows}</table></div>"
+
+
+def _project_map(stats: Stats) -> str:
+    if not stats.hotspots and not stats.hotspots_hidden:
+        return ""
+    parts = [f"<h2>{L('Mapa projektu — czego Claude szuka w kółko', 'Project map — what Claude looks up again and again')}{qm('projectmap')}</h2>"]
+    if stats.hotspots_hidden:
+        parts.append(f"<p class=sub>{L('Ukryte z --private (nazwy plików i klas zdradzają projekt).', 'Hidden with --private (file and class names reveal the project).')}</p>")
+        return "\n".join(parts)
+    for project in stats.hotspots:
+        if project.instructions:
+            loaded = ", ".join(L(f"{f.name} ({f.lines} linii)", f"{f.name} ({f.lines} lines)")
+                               for f in project.instructions[:4])
+            info = L("instrukcje: ", "instructions: ") + E(loaded)
+        else:
+            info = L("brak CLAUDE.md — uruchom /init w tym projekcie",
+                     "no CLAUDE.md — run /init in this project")
+        parts.append(f"<p><b>{E(home_relative(project.root))}</b> <span class=few>· {info}"
+                     f"</span></p>")
+        parts.append(_hotspot_table(project))
+        draft = project.draft()
+        if draft:
+            text = "\n".join([L("## Mapa projektu", "## Project map")] + draft)
+            parts.append(f"<details><summary>{L('Szkic do CLAUDE.md (uzupełnij „…” jednym zdaniem)', 'Draft for CLAUDE.md (replace “…” with one sentence)')}"
+                         f"</summary><div class=\"card explain\">{E(text)}</div></details>")
+    return "\n".join(parts)
+
+
 def _tips(stats: Stats) -> str:
     items = "".join(f"<li>{E(t)}</li>" for t in tips(stats))
     return (f"<h2>{L('Co można poprawić', 'What you could improve')}{qm('tips')}</h2>"
@@ -408,6 +467,7 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         _context_length(stats),
         _heaviest_sessions(stats, ctx),
         _cache_and_repeats(stats),
+        _project_map(stats),
         _tips(stats),
         _footer(),
         "</main>",

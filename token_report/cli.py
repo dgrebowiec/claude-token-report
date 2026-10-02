@@ -203,7 +203,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     stats = aggregate(current, sessions, namer)
     prev_stats = None
     if prev_start is not None:
-        prev_stats = aggregate([c for c in calls if prev_start <= c.time < start], sessions, namer)
+        prev_stats = aggregate([c for c in calls if prev_start <= c.time < start], sessions, namer,
+                               hotspots=False)
         ctx.prev_label = period_label(prev_start, start)
     daily = _daily_rows(window, calls, current) if args.daily else None
 

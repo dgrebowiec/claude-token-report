@@ -1,6 +1,7 @@
 """Small number/text formatters shared by the text and HTML reports."""
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from .i18n import L
@@ -30,6 +31,11 @@ def short(name: str, width: int) -> str:
     if len(name) <= width:
         return name
     return "…" + name[-(width - 1):]
+
+
+def home_relative(path: str) -> str:
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
 
 
 def bar(frac: float, width: int = 24) -> str:

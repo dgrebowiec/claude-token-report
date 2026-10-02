@@ -8,6 +8,7 @@ from typing import Counter, DefaultDict, Dict, List, Mapping, NamedTuple, Option
 
 from .classify import call_activities
 from .formatting import pct
+from .hotspots import ProjectHotspots, find_hotspots
 from .i18n import L, weekday
 from .naming import Namer
 from .pricing import cache_rewrite_waste, context_size
@@ -126,6 +127,8 @@ class Stats:
         default_factory=lambda: collections.defaultdict(SessionStats))
     rebuilds: Rebuilds = field(default_factory=Rebuilds)
     rereads: Rereads = field(default_factory=Rereads)
+    hotspots: List[ProjectHotspots] = field(default_factory=list)
+    hotspots_hidden: bool = False  # --private: symbol and file names would reveal the project
     n_sessions: int = 0
     n_subagents: int = 0
 
@@ -173,7 +176,7 @@ def ctx_growth(stats: Stats) -> Optional[Tuple[float, float, str]]:
 # --------------------------------------------------------------------------- aggregation
 
 def aggregate(calls: List[Call], sessions: Mapping[SessionKey, SessionMeta],
-              namer: Namer) -> Stats:
+              namer: Namer, hotspots: bool = True) -> Stats:
     stats = Stats(n_calls=len(calls))
     by_file: DefaultDict[FileKey, List[Call]] = collections.defaultdict(list)
     for call in calls:
@@ -181,6 +184,9 @@ def aggregate(calls: List[Call], sessions: Mapping[SessionKey, SessionMeta],
         by_file[call.file_key].append(call)
     stats.rebuilds = _find_rebuilds(by_file)
     stats.rereads = _find_rereads(by_file, sessions, namer)
+    if hotspots:
+        stats.hotspots_hidden = namer.private
+        stats.hotspots = [] if namer.private else find_hotspots(calls, sessions)
     stats.n_sessions = len(stats.by_session)
     stats.n_subagents = len({c.file_key for c in calls if c.is_subagent})
     return stats

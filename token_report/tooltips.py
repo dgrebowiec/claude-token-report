@@ -98,6 +98,12 @@ HELP = {  # tooltip texts for the "?" marks in the HTML report: key -> (pl, en)
     "reread": ("Odczyty (narzędzie Read) fragmentu pliku, który już był w rozmowie — bez zmian "
                "ani kompakcji pomiędzy.", "Read tool calls for a part of a file already in the "
                "conversation — no edit or compaction in between."),
+    "projectmap": ("Pliki i symbole (klasy, funkcje), których Claude szukał w kilku rozmowach "
+                   "— każda nowa rozmowa odkrywa je od zera. Jedna linia w CLAUDE.md oszczędza to "
+                   "szukanie. „duży” = ponad 800 linii, Claude czyta go kawałkami.",
+                   "Files and symbols (classes, functions) Claude looked up in several "
+                   "conversations — each new conversation finds them from scratch. One line in "
+                   "CLAUDE.md saves that search. 'large' = over 800 lines, read in pieces."),
     "tips": ("Wskazówki wyliczone automatycznie z liczb powyżej.",
              "Suggestions computed automatically from the numbers above."),
     "compare": ("Te same miary dla poprzedniego okresu o tej samej długości.",
