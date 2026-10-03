@@ -107,15 +107,17 @@ def _hotspot_tips(stats: Stats) -> List[str]:
             continue
         name = os.path.basename(project.root)
         examples = ", ".join(f"{os.path.basename(i.name)} ({i.uses}×)" for i in missing[:3])
-        where = (L("nie ma ich w CLAUDE.md", "they are not in CLAUDE.md") if project.instructions
+        where = (L("raport nie znalazł ich w CLAUDE.md ani w mapach, do których odsyła",
+                   "the report did not find them in CLAUDE.md or the maps it links to")
+                 if project.instructions
                  else L("projekt nie ma CLAUDE.md (/init)", "the project has no CLAUDE.md (/init)"))
         out.append(L(
             f"{name}: Claude w kilku rozmowach szukał tych samych rzeczy, np. {examples}, a "
-            f"{where}. Krótka mapa projektu oszczędzi to szukanie — szkic jest w sekcji "
-            f"MAPA PROJEKTU.",
+            f"{where}. Jeśli naprawdę ich brakuje, krótka mapa projektu oszczędzi to szukanie — "
+            f"szkic i ograniczenia sprawdzania są w sekcji MAPA PROJEKTU.",
             f"{name}: Claude looked up the same things in several conversations, e.g. "
-            f"{examples}, and {where}. A short project map saves that search — there is a "
-            f"draft in the PROJECT MAP section."))
+            f"{examples}, and {where}. If they really are missing, a short project map saves "
+            f"that search — the PROJECT MAP section has a draft and the limits of the check."))
 
     large = [(i, p) for p in stats.hotspots for i in p.files if (i.lines or 0) >= LARGE_FILE]
     if large:

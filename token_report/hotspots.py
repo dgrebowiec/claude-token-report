@@ -14,6 +14,7 @@ from typing import (TYPE_CHECKING, DefaultDict, Dict, Iterable, Iterator, List, 
                     Optional, Sequence, Set, Tuple)
 
 from .classify import file_commands
+from .i18n import L
 from .naming import split_worktree
 
 if TYPE_CHECKING:
@@ -48,6 +49,36 @@ _MD_LINK = re.compile(r"\]\(([^)\s#]+\.md)\)|`([^`\s]+\.md)`")  # [map](docs/map
 
 
 # --------------------------------------------------------------------------- results
+
+def column_name() -> str:
+    return L("w instrukcjach", "in instructions")
+
+
+def status(item: "Item") -> str:
+    """"yes", "via link", "not found" — never a plain "no": the check is a text search"""
+    if item.linked:
+        return L("przez link", "via link")
+    if item.documented is None:
+        return "-"
+    return L("tak", "yes") if item.documented else L("nie znaleziono", "not found")
+
+
+def limits_note() -> str:
+    return L(
+        "„w instrukcjach” = nazwa pliku lub symbolu występuje dosłownie w CLAUDE.md (w projekcie, "
+        "wyżej, w .claude/ i CLAUDE.local.md), ich @importach, .claude/rules, ~/.claude/CLAUDE.md "
+        "albo AGENTS.md; „przez link” = w pliku .md podlinkowanym bezpośrednio z nich (np. mapa "
+        "projektu). Raport nie idzie za dalszymi linkami i nie czyta skilli, auto memory ani "
+        "CLAUDE.md w podkatalogach, a opis bez dosłownej nazwy nie zostanie rozpoznany. "
+        "„nie znaleziono” znaczy więc „prawdopodobnie brakuje” — sprawdź, zanim dopiszesz.",
+        "'in instructions' = the file or symbol name appears verbatim in CLAUDE.md (in the "
+        "project, above it, in .claude/ and CLAUDE.local.md), their @imports, .claude/rules, "
+        "~/.claude/CLAUDE.md or AGENTS.md; 'via link' = in a .md file linked directly from them "
+        "(e.g. a project map). The report does not follow further links and does not read "
+        "skills, auto memory or CLAUDE.md files in subdirectories, and a description without the "
+        "exact name is not recognised. So 'not found' means 'probably missing' — check before "
+        "you add it.")
+
 
 @dataclass
 class Item:

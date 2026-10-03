@@ -10,7 +10,7 @@ from .context import TOP_ROWS, ReportContext
 from .daily import DayRow, daily_summary
 from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative,
                          pct, short, side_name)
-from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, Item
+from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, column_name, limits_note, status
 from .i18n import L, weekday
 from .naming import Namer
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
@@ -294,14 +294,6 @@ def _rereads(out: _Lines, stats: Stats) -> None:
         out.add(f"    {name[:50]:<52}+{n}")
 
 
-def _documented(item: Item) -> str:
-    if item.linked:
-        return L("przez link", "via link")
-    if item.documented is None:
-        return "-"
-    return L("tak", "yes") if item.documented else L("nie", "no")
-
-
 def _project_map(out: _Lines, stats: Stats) -> None:
     if not stats.hotspots and not stats.hotspots_hidden:
         return
@@ -313,14 +305,11 @@ def _project_map(out: _Lines, stats: Stats) -> None:
         return
     out.note(L(
         "Pliki i symbole, których Claude szukał w kilku rozmowach. Każda nowa rozmowa odkrywa je "
-        "od zera; jedna linia w CLAUDE.md oszczędza to szukanie. „w CLAUDE.md” = wspomniane w "
-        "CLAUDE.md, jego @importach albo .claude/rules; „przez link” = w pliku .md, do którego "
-        "CLAUDE.md odsyła (np. mapa projektu), więc Claude doczytuje go na żądanie.",
+        "od zera; jedna linia w CLAUDE.md oszczędza to szukanie.",
         "Files and symbols Claude looked up in several conversations. Each new conversation "
-        "finds them from scratch; one line in CLAUDE.md saves that search. 'in CLAUDE.md' = "
-        "mentioned in CLAUDE.md, its @imports or .claude/rules; 'via link' = in a .md file "
-        "CLAUDE.md points to (e.g. a project map), which Claude reads on demand."))
-    in_claude = L("w CLAUDE.md", "in CLAUDE.md")
+        "finds them from scratch; one line in CLAUDE.md saves that search."))
+    out.note(limits_note())
+    in_claude = column_name()
     for project in stats.hotspots:
         out.add()
         out.add(" " + home_relative(project.root))
@@ -347,13 +336,13 @@ def _project_map(out: _Lines, stats: Stats) -> None:
                 lines = str(item.lines) if item.lines is not None else "-"
                 large = L("  duży", "  large") if (item.lines or 0) >= LARGE_FILE else ""
                 out.add(f"   {short(item.name, 51):<52}{item.uses:>8}{item.sessions:>7}"
-                        f"{lines:>7}  {_documented(item)}{large}")
+                        f"{lines:>7}  {status(item)}{large}")
         if project.symbols:
             out.add(f"   {L('symbol', 'symbol'):<52}{L('szukania', 'lookups'):>8}"
                     f"{L('rozm.', 'convs'):>7}{'':>7}  {in_claude}")
             for item in project.symbols:
                 out.add(f"   {short(item.name, 51):<52}{item.uses:>8}{item.sessions:>7}{'':>7}"
-                        f"  {_documented(item)}")
+                        f"  {status(item)}")
         if any((i.lines or 0) >= LARGE_FILE for i in project.files):
             out.note(L(f"„duży” = ponad {LARGE_FILE} linii: Claude czyta go kawałkami w każdej "
                        f"rozmowie. Opisz w CLAUDE.md, co jest w której części, albo podziel plik.",
@@ -361,8 +350,8 @@ def _project_map(out: _Lines, stats: Stats) -> None:
                        f"conversation. Describe in CLAUDE.md what is where in it, or split it."))
         draft = project.draft()
         if draft:
-            out.add("   " + L("szkic do CLAUDE.md (uzupełnij „…” jednym zdaniem):",
-                              "draft for CLAUDE.md (replace '…' with one sentence):"))
+            out.add("   " + L("szkic do CLAUDE.md dla „nie znaleziono” (sprawdź, uzupełnij „…”):",
+                              "draft for CLAUDE.md for 'not found' (check, then fill in '…'):"))
             out.add("     " + L("## Mapa projektu", "## Project map"))
             for line in draft:
                 out.add("     " + line)

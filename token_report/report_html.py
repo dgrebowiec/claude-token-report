@@ -12,7 +12,7 @@ from .daily import DayRow, daily_summary
 from .explain import explain_text
 from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative, pct,
                          side_name)
-from .hotspots import LARGE_FILE, Item, ProjectHotspots
+from .hotspots import LARGE_FILE, Item, ProjectHotspots, column_name, limits_note, status
 from .i18n import L, get_lang, weekday
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
 from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
@@ -373,15 +373,12 @@ def _cache_and_repeats(stats: Stats) -> str:
 
 
 def _documented(item: Item) -> str:
-    if item.linked:
-        return L("przez link", "via link")
-    if item.documented is None:
-        return "–"
-    return L("tak", "yes") if item.documented else f"<b>{L('nie', 'no')}</b>"
+    text = E(status(item))
+    return f"<b>{text}</b>" if item.documented is False and not item.linked else text
 
 
 def _hotspot_table(project: ProjectHotspots) -> str:
-    in_claude = f"<th>{L('w CLAUDE.md', 'in CLAUDE.md')}</th>"
+    in_claude = f"<th>{column_name()}</th>"
     rows = ""
     if project.files:
         rows += (f"<tr><th>{L('plik', 'file')}</th><th class=n>{L('odczyty', 'reads')}</th>"
@@ -410,6 +407,7 @@ def _project_map(stats: Stats) -> str:
     if stats.hotspots_hidden:
         parts.append(f"<p class=sub>{L('Ukryte z --private (nazwy plików i klas zdradzają projekt).', 'Hidden with --private (file and class names reveal the project).')}</p>")
         return "\n".join(parts)
+    parts.append(f"<p class=sub>{E(limits_note())}</p>")
     for project in stats.hotspots:
         if project.instructions:
             loaded = ", ".join(L(f"{f.name} ({f.lines} linii)", f"{f.name} ({f.lines} lines)")
@@ -424,7 +422,7 @@ def _project_map(stats: Stats) -> str:
         draft = project.draft()
         if draft:
             text = "\n".join([L("## Mapa projektu", "## Project map")] + draft)
-            parts.append(f"<details><summary>{L('Szkic do CLAUDE.md (uzupełnij „…” jednym zdaniem)', 'Draft for CLAUDE.md (replace “…” with one sentence)')}"
+            parts.append(f"<details><summary>{L('Szkic do CLAUDE.md dla „nie znaleziono” (sprawdź, uzupełnij „…”)', 'Draft for CLAUDE.md for “not found” (check, then fill in “…”)')}"
                          f"</summary><div class=\"card explain\">{E(text)}</div></details>")
     return "\n".join(parts)
 

@@ -304,11 +304,14 @@ The **PROJECT MAP** section lists, for up to three projects:
 - **symbols** (camelCase / snake_case names) it searched for with Grep, Glob, `grep`, `rg`,
   `git grep`, `find -name` or `fd`. A `grep` that filters piped output (`git log | grep foo`)
   is not counted, nor is a search in another directory
-- whether each one is already mentioned in what Claude Code loads as instructions: `CLAUDE.md`,
+- whether each one is already mentioned (by its exact name) in what Claude Code loads as instructions: `CLAUDE.md`,
   `.claude/CLAUDE.md` and `CLAUDE.local.md` (in the project and above it), their `@imports`,
   `.claude/rules/`, `~/.claude/CLAUDE.md`, and `AGENTS.md` when there is no `CLAUDE.md`.
   `via link` means it is in a `.md` file those instructions link to (say, a project map Claude
-  is told to read first), which loads only when Claude reads it
+  is told to read first), which loads only when Claude reads it.
+  This is a text search with limits: it follows links one level deep, does not read skills,
+  auto memory or `CLAUDE.md` files in subdirectories, and does not recognise a description
+  without the exact name. So `not found` means *probably missing*: check before you add it
 - a draft to paste into `CLAUDE.md`, one line per missing item; you fill in the `…`:
 
 ```markdown
