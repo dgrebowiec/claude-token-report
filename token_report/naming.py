@@ -10,7 +10,7 @@ from .transcripts import SessionMeta
 _WORKTREE = re.compile(r"^(.*?)[/\\]\.claude[/\\]worktrees[/\\]([^/\\]+)")
 # subagent types that ship with Claude Code; user-defined ones are anonymised with --private
 _BUILTIN_AGENTS = {"general-purpose", "Explore", "Plan", "fork", "claude", "statusline-setup",
-                   "claude-code-guide"}
+                   "claude-code-guide", "workflow-subagent"}
 
 
 def split_worktree(cwd: str) -> Tuple[str, Optional[str]]:
@@ -25,6 +25,7 @@ class Namer:
         self._projects: Dict[str, str] = {}
         self._files: Dict[str, str] = {}
         self._agents: Dict[str, str] = {}
+        self._skills: Dict[str, str] = {}
 
     def project(self, meta: Optional[SessionMeta], proj_dir: str) -> str:
         cwd = meta.cwd if meta else None
@@ -65,6 +66,11 @@ class Namer:
         if name not in self._agents:
             self._agents[name] = f"agent-{len(self._agents) + 1}"
         return self._agents[name]
+
+    def skill(self, name: str) -> str:
+        if not self.private:
+            return name
+        return self._skills.setdefault(name, f"skill-{len(self._skills) + 1}")
 
     def topic(self, text: Optional[str]) -> str:
         return "" if self.private else (text or "")

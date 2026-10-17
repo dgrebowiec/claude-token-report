@@ -35,6 +35,10 @@ class SessionMeta:
     topic: str = ""  # the first real request
     prompts: List[Prompt] = field(default_factory=list)
     compactions: List[Tuple[datetime.datetime, FileKey]] = field(default_factory=list)
+    git_branch: Optional[str] = None
+    version: Optional[str] = None  # of Claude Code
+    ultracode: List[datetime.datetime] = field(default_factory=list)  # when it was switched on
+    skills: Dict[str, int] = field(default_factory=dict)  # skill -> chars of its listing line
 
 
 @dataclass
@@ -49,6 +53,10 @@ class Call:
     usage: Optional[Dict[str, Any]] = None
     tools: Dict[Any, Tuple[str, Dict[str, Any]]] = field(default_factory=dict)
     agent_type: Optional[str] = None
+    agent_task: Optional[str] = None  # the Agent tool's description of the subagent's job
+    result_chars: Dict[Any, int] = field(default_factory=dict)  # tool id -> chars of its result
+    effort: Optional[str] = None  # effort level the call ran with (low ... max)
+    speed: Optional[str] = None  # "fast" in fast mode
     # filled in by _finish() once the last usage record of the message is known
     tokens: Dict[str, int] = field(default_factory=dict)
     weighted_by_type: Dict[str, float] = field(default_factory=dict)
@@ -78,14 +86,19 @@ def _agent_id(filename: str) -> str:
     return stem[len("agent-"):] if stem.startswith("agent-") else stem
 
 
+def _is_agent_file(filename: str) -> bool:
+    return filename != "journal.jsonl"  # a Workflow run's log, not a conversation
+
+
 def transcript_files(root: str) -> Iterator[TranscriptFile]:
-    """<root>/<project>/<session>.jsonl and <root>/<project>/<session>/subagents/<agent>.jsonl"""
+    """<root>/<project>/<session>.jsonl and <root>/<project>/<session>/subagents/<agent>.jsonl,
+    also deeper: subagents/workflows/<run>/<agent>.jsonl for the agents of a Workflow run"""
     for path in glob.glob(os.path.join(root, "*", "**", "*.jsonl"), recursive=True):
         rel = os.path.relpath(path, root).split(os.sep)
         if len(rel) == 2:
             yield TranscriptFile(path, rel[0], rel[1][:-len(".jsonl")], None)
-        elif len(rel) == 4 and rel[2] == "subagents":
-            yield TranscriptFile(path, rel[0], rel[1], _agent_id(rel[3]))
+        elif len(rel) >= 4 and rel[2] == "subagents" and _is_agent_file(rel[-1]):
+            yield TranscriptFile(path, rel[0], rel[1], _agent_id(rel[-1]))
 
 
 def _main_transcripts(root: str) -> Iterator[Tuple[float, TranscriptFile]]:
@@ -122,8 +135,11 @@ def find_session(root: str, ident: Optional[str]) -> Optional[Tuple[SessionKey, 
         return None
     main = best[1]
     files = [main]
-    pattern = os.path.join(os.path.dirname(main.path), main.session_id, "subagents", "*.jsonl")
-    for path in sorted(glob.glob(pattern)):
+    pattern = os.path.join(os.path.dirname(main.path), main.session_id, "subagents", "**",
+                           "*.jsonl")
+    for path in sorted(glob.glob(pattern, recursive=True)):
+        if not _is_agent_file(os.path.basename(path)):
+            continue
         files.append(TranscriptFile(path, main.proj_dir, main.session_id,
                                     _agent_id(os.path.basename(path))))
     return (main.proj_dir, main.session_id), files
@@ -140,6 +156,7 @@ _STRIP_BLOCKS = re.compile(
     r"<(system-reminder|local-command-stdout|local-command-stderr|local-command-caveat)>"
     r".*?</\1>", re.S)
 _AGENT_ID = re.compile(r"agentId:\s*([0-9a-zA-Z_-]{6,40})")
+_SKILL_LINE = re.compile(r"^- ([^\s:][^:\n]*): ", re.M)  # "- name: description" in skill_listing
 
 
 def _user_text(content: Any) -> str:
@@ -178,8 +195,11 @@ class _Loader:
         self.sessions: Dict[SessionKey, SessionMeta] = {}
         # subagent type: from <agent>.meta.json, or matched Agent tool_use -> its result's agentId
         self.type_by_agent_meta: Dict[str, str] = {}
+        self.task_by_agent_meta: Dict[str, str] = {}
         self.type_by_tool_use: Dict[str, str] = {}
         self.agent_by_tool_use: Dict[str, str] = {}
+        self.task_by_tool_use: Dict[str, str] = {}
+        self.result_chars: Dict[str, int] = {}  # tool_use id -> size of the tool result
 
     def in_window(self, t: datetime.datetime) -> bool:
         return (self.start is None or t >= self.start) and (self.end is None or t <= self.end)
@@ -215,6 +235,8 @@ class _Loader:
                 meta = json.load(f)
             if meta.get("agentType"):
                 self.type_by_agent_meta[tf.agent_id] = meta["agentType"]
+            if meta.get("description"):
+                self.task_by_agent_meta[tf.agent_id] = str(meta["description"])
         except (OSError, ValueError):
             pass
 
@@ -222,6 +244,9 @@ class _Loader:
                 sess: SessionMeta) -> None:
         if not sess.cwd and record.get("cwd"):
             sess.cwd = record["cwd"]
+        if not tf.agent_id:
+            sess.git_branch = record.get("gitBranch") or sess.git_branch
+            sess.version = record.get("version") or sess.version
         message = record.get("message") or {}
         if not isinstance(message, dict):
             message = {}
@@ -234,6 +259,32 @@ class _Loader:
             self._assistant(message, record, t, tf, file_key, bool(tf.agent_id) or sidechain)
         elif kind == "user":
             self._user(message, record, t, sess, bool(tf.agent_id) or sidechain)
+        elif kind == "attachment" and isinstance(record.get("attachment"), dict) and \
+                record["attachment"].get("type") == "ultra_effort_enter" and not tf.agent_id:
+            sess.ultracode.append(t)
+        elif kind == "attachment" and isinstance(record.get("attachment"), dict) and \
+                record["attachment"].get("type") == "skill_listing" and not tf.agent_id and \
+                self.in_window(t):
+            self._skill_listing(record["attachment"], sess)
+
+    @staticmethod
+    def _skill_listing(attachment: Dict[str, Any], sess: SessionMeta) -> None:
+        """the skills Claude was told about in the conversation (the first listing is complete,
+        later ones add new skills); each is a line "- name: description" """
+        text = attachment.get("content") if isinstance(attachment.get("content"), str) else ""
+        names = attachment.get("names")
+        if isinstance(names, list):  # exact: a plugin skill's name has a colon, a bullet inside
+            starts = []          # a description looks like a skill line
+            for name in names:
+                at = ("\n" + text).find(f"\n- {name}: ")
+                if at >= 0:
+                    starts.append((at, name))
+        else:
+            starts = [(m.start(), m.group(1).strip()) for m in _SKILL_LINE.finditer(text)]
+        starts.sort()
+        for i, (at, name) in enumerate(starts):
+            end = starts[i + 1][0] if i + 1 < len(starts) else len(text)
+            sess.skills[name] = end - at
 
     def _assistant(self, message: Dict[str, Any], record: Dict[str, Any], t: datetime.datetime,
                    tf: TranscriptFile, file_key: FileKey, is_subagent: bool) -> None:
@@ -241,8 +292,10 @@ class _Loader:
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_use" and \
                     block.get("name") in ("Agent", "Task") and block.get("id"):
-                self.type_by_tool_use[block["id"]] = (block.get("input") or {}).get(
+                tool_input = block.get("input") or {}
+                self.type_by_tool_use[block["id"]] = tool_input.get(
                     "subagent_type") or "general-purpose"
+                self.task_by_tool_use[block["id"]] = str(tool_input.get("description") or "")
         model = message.get("model") or "?"
         msg_id = message.get("id") or record.get("requestId") or record.get("uuid")
         if not self.in_window(t) or model == "<synthetic>" or not msg_id:
@@ -251,9 +304,11 @@ class _Loader:
         if call is None:
             call = self.calls[msg_id] = Call(
                 time=t, model=model, session_key=(tf.proj_dir, tf.session_id),
-                file_key=file_key, agent_id=tf.agent_id, is_subagent=is_subagent)
+                file_key=file_key, agent_id=tf.agent_id, is_subagent=is_subagent,
+                effort=record.get("effort"))
         if message.get("usage"):
             call.usage = message["usage"]  # a message is logged in parts; the last usage wins
+            call.speed = call.usage.get("speed") or call.speed
         for i, block in enumerate(content):
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 call.tools[block.get("id") or (len(call.tools), i)] = (
@@ -265,6 +320,7 @@ class _Loader:
         is_result = isinstance(content, list) and any(_is_tool_result(x) for x in content)
         if is_result:
             self._remember_agent_ids(content)
+            self._remember_result_sizes(content)
         if is_result or is_subagent or record.get("isMeta") or record.get("isCompactSummary"):
             return
         raw = _user_text(content)
@@ -281,6 +337,12 @@ class _Loader:
         if self.in_window(t):
             sess.prompts.append(Prompt(t, kind, text[:300]))
 
+    def _remember_result_sizes(self, content: List[Any]) -> None:
+        """how much text each tool result put into the conversation (images are not counted)"""
+        for x in content:
+            if _is_tool_result(x) and x.get("tool_use_id"):
+                self.result_chars[x["tool_use_id"]] = len(_user_text(x.get("content")))
+
     def _remember_agent_ids(self, content: List[Any]) -> None:
         """an Agent tool result says which subagent transcript (agentId) it came from"""
         for x in content:
@@ -291,13 +353,18 @@ class _Loader:
 
     def result(self) -> Tuple[List[Call], Dict[SessionKey, SessionMeta]]:
         type_by_agent = dict(self.type_by_agent_meta)
+        task_by_agent = dict(self.task_by_agent_meta)
         for tool_use_id, agent_id in self.agent_by_tool_use.items():
             type_by_agent.setdefault(agent_id, self.type_by_tool_use.get(tool_use_id))
+            task_by_agent.setdefault(agent_id, self.task_by_tool_use.get(tool_use_id, ""))
         out = []
         for call in self.calls.values():
             if not call.usage:
                 continue
             call.agent_type = type_by_agent.get(call.agent_id) if call.is_subagent else None
+            call.agent_task = task_by_agent.get(call.agent_id) if call.is_subagent else None
+            call.result_chars = {tid: self.result_chars[tid] for tid in call.tools
+                                 if tid in self.result_chars}
             call._finish()
             out.append(call)
         out.sort(key=lambda c: c.time)

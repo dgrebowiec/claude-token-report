@@ -76,6 +76,15 @@ class PricingTest(unittest.TestCase):
         self.assertAlmostEqual(model_weight("claude-opus-5-5"), 0.8)
         self.assertAlmostEqual(model_weight("claude-sonnet-5-5"), 0.4)
         self.assertAlmostEqual(model_weight("claude-haiku-4-5-20251001"), 0.2)
+        self.assertAlmostEqual(model_weight("claude-haiku-5-5"), 0.02)
+
+    def test_cache_read_discounts_and_haiku_5_5_prompt_tiers(self):
+        read = {"input": 0, "cache_read": 1_000_000, "cache_write_5m": 0, "cache_write_1h": 0, "output": 0}
+        self.assertAlmostEqual(weighted_by_type(read, "claude-sonnet-5-5")["cache_read"], 0.1 / 5 * 1_000_000)
+        self.assertAlmostEqual(weighted_by_type(read, "claude-sonnet-5")["cache_read"], 0.2 / 5 * 1_000_000)
+        short = {"input": 1_000, "cache_read": 0, "cache_write_5m": 0, "cache_write_1h": 0, "output": 1_000}
+        self.assertAlmostEqual(sum(weighted_by_type(short, "claude-haiku-5-5").values()), (1_000 * 0.1 + 1_000 * 0.5) / 5)
+        self.assertAlmostEqual(weighted_by_type(read, "claude-haiku-5-5")["cache_read"], 0.05 / 5 * 1_000_000)
 
 
 class FormattingTest(unittest.TestCase):

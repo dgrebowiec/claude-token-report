@@ -33,7 +33,7 @@ CO ZNACZĄ LICZBY W TYM RAPORCIE
    same proporcje: odczyt z cache kosztuje 10% ceny zwykłego wejścia,
    zapis do cache 125% (cache 5-minutowy) lub 200% (1-godzinny), a wyjście
    5 razy tyle co wejście (np. Opus 5: 5 USD za 1M tokenów wejścia i 25 USD
-   za 1M wyjścia). Wyjątki: Fable 5.1 ma odczyt z cache x0.025, Opus 5.5 x0.05.
+   za 1M wyjścia). Wyjątki: Fable 5.1 ma odczyt z cache x0.025, Opus 5.5 i Sonnet 5.5 x0.05.
    Na planie Pro/Max nie płacisz za tokeny, tylko masz limit użycia. Anthropic
    nie publikuje dokładnego wzoru tego limitu. Wiadomo, że droższe modele
    zużywają go szybciej. Raport ZAKŁADA, że limit liczy tokeny w tych samych
@@ -65,6 +65,7 @@ CO ZNACZĄ LICZBY W TYM RAPORCIE
    Fable 5 / 5.1         x2      Sonnet 4.x          x0.6
    Opus 5, Opus 4.5-4.8  x1      Sonnet 5 / 5.5      x0.4
    Opus 5.5              x0.8    Haiku 4.5           x0.2
+                                 Haiku 5.5           x0.02 (x0.1 przy prompcie ponad 100 tys. tokenów)
    Ta sama praca na Sonnecie 5 obciąża limit 2.5 raza mniej niż na Opusie 5.
 
 7. DLACZEGO DŁUGIE ROZMOWY ZUŻYWAJĄ WIĘCEJ
@@ -127,7 +128,7 @@ WHAT THE NUMBERS IN THIS REPORT MEAN
    a cache read costs 10% of a normal input token, a cache write 125%
    (5-minute cache) or 200% (1-hour cache), and output 5 times the input
    price (e.g. Opus 5: $5 per 1M input tokens and $25 per 1M output tokens).
-   Exceptions: Fable 5.1 cache reads are x0.025, Opus 5.5 x0.05.
+   Exceptions: Fable 5.1 cache reads are x0.025, Opus 5.5 and Sonnet 5.5 x0.05.
    On a Pro/Max plan you don't pay per token, you have a usage limit.
    Anthropic does not publish the exact formula behind it. It is known that
    pricier models use it faster. This report ASSUMES the limit counts tokens
@@ -159,6 +160,7 @@ WHAT THE NUMBERS IN THIS REPORT MEAN
    Fable 5 / 5.1         x2      Sonnet 4.x          x0.6
    Opus 5, Opus 4.5-4.8  x1      Sonnet 5 / 5.5      x0.4
    Opus 5.5              x0.8    Haiku 4.5           x0.2
+                                 Haiku 5.5           x0.02 (x0.1 for prompts over 100k tokens)
    The same work on Sonnet 5 uses the limit 2.5 times less than on Opus 5.
 
 7. WHY LONG CONVERSATIONS USE MORE

@@ -34,21 +34,30 @@ _PRICES: List[Tuple[str, float, float, float]] = [
     ("opus-4-5", 5.0, 25.0, 0.50),
     ("opus-4", 15.0, 75.0, 1.50),      # Opus 4 / 4.1
     ("3-opus", 15.0, 75.0, 1.50),
-    ("sonnet-5-5", 2.0, 10.0, 0.20),
+    ("sonnet-5-5", 2.0, 10.0, 0.10),
     ("sonnet-5", 2.0, 10.0, 0.20),
     ("sonnet", 3.0, 15.0, 0.30),       # Sonnet 3.7 / 4 / 4.5 / 4.6
+    ("haiku-5-5", 0.10, 0.50, 0.01),   # prompts up to 100k tokens, see _LONG_PROMPT_PRICES
     ("haiku-4-5", 1.0, 5.0, 0.10),
     ("3-5-haiku", 0.8, 4.0, 0.08),
     ("3-haiku", 0.25, 1.25, 0.025),
     ("haiku", 1.0, 5.0, 0.10),
+]
+# Models priced per request by prompt length (input + cache reads + cache writes):
+# (substring of model id, prompt tokens above which the higher price applies, input, output, cache read).
+_LONG_PROMPT_PRICES: List[Tuple[str, int, float, float, float]] = [
+    ("haiku-5-5", 100_000, 0.50, 2.50, 0.05),
 ]
 REF_PRICE = 5.0  # input price of the reference model (Opus 5) -> model weight 1.0
 _FALLBACK_PRICE: Price = (5.0, 25.0, 0.50)  # unknown models are counted as Opus 5
 _unknown_models: Set[str] = set()
 
 
-def price_for(model: str) -> Price:
+def price_for(model: str, prompt_tokens: float = 0) -> Price:
     ml = (model or "").lower()
+    for pattern, threshold, p_in, p_out, p_cache_read in _LONG_PROMPT_PRICES:
+        if pattern in ml and prompt_tokens > threshold:
+            return p_in, p_out, p_cache_read
     for pattern, p_in, p_out, p_cache_read in _PRICES:
         if pattern in ml:
             return p_in, p_out, p_cache_read
@@ -96,7 +105,7 @@ def context_size(tokens: Mapping[str, float]) -> float:
 
 def weighted_by_type(tokens: Mapping[str, int], model: str) -> Dict[str, float]:
     """weighted tokens per token type: token type weight × model weight"""
-    p_in, p_out, p_cache_read = price_for(model)
+    p_in, p_out, p_cache_read = price_for(model, context_size(tokens))
     return {"input": tokens["input"] * p_in / REF_PRICE,
             "cache_read": tokens["cache_read"] * p_cache_read / REF_PRICE,
             "cache_write_5m": tokens["cache_write_5m"] * p_in * W_WRITE_5M / REF_PRICE,
@@ -106,6 +115,6 @@ def weighted_by_type(tokens: Mapping[str, int], model: str) -> Dict[str, float]:
 
 def cache_rewrite_waste(tokens: Mapping[str, int], model: str) -> float:
     """how much more a cache write weighed than reading the same tokens from the cache"""
-    p_in, _p_out, p_cache_read = price_for(model)
+    p_in, _p_out, p_cache_read = price_for(model, context_size(tokens))
     return (tokens["cache_write_5m"] * (p_in * W_WRITE_5M - p_cache_read)
             + tokens["cache_write_1h"] * (p_in * W_WRITE_1H - p_cache_read)) / REF_PRICE

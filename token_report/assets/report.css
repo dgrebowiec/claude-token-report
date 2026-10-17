@@ -61,3 +61,21 @@ details{margin-top:12px} summary{cursor:pointer;color:var(--acc);font-weight:600
 ul{padding-left:20px} li{margin:6px 0}
 footer{color:var(--mut);font-size:12px;margin-top:32px;border-top:1px solid var(--line);padding-top:12px}
 @media (max-width:600px){.slab{width:105px} h1{font-size:20px}}
+tr.sess{cursor:pointer} tr.sess:hover td,tr.sess.open td{background:color-mix(in srgb,var(--acc) 7%,transparent)}
+.sbtn{all:unset;cursor:pointer;font:inherit;display:inline-flex;gap:6px;align-items:center}
+.sbtn:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:3px}
+.sbtn i{font-style:normal;color:var(--mut);transition:transform .15s}
+tr.sess.open .sbtn i{transform:rotate(90deg)}
+tr.sdet>td{background:var(--bg);padding:14px 16px 18px;max-width:0} /* don't widen the outer table */
+.sd h3{font-size:13px;margin:16px 0 6px;display:flex;align-items:center;gap:4px}
+.sd table{min-width:520px} .sd .t{max-width:260px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:5px 16px;margin:0}
+.kv dt{color:var(--mut);font-size:12.5px;display:flex;align-items:center}
+.kv dd{margin:0;overflow-wrap:anywhere}
+.chip{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:1px 9px;margin:0 4px 3px 0;font-size:12.5px}
+.chip small{color:var(--mut)}
+.srch{margin:4px 0;columns:2 260px} .srch code{font:12px ui-monospace,Menlo,monospace}
+@media (max-width:600px){.kv{grid-template-columns:1fr} .kv dt{margin-top:6px}}
+.sd{max-width:calc(min(1040px,100vw - 32px) - 36px)} /* fits the visible width of the table */
+table.sessions .t{max-width:220px}
+.sd td.m{white-space:nowrap}

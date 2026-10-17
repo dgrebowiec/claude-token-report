@@ -15,9 +15,13 @@ from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_re
 from .hotspots import LARGE_FILE, Item, ProjectHotspots, column_name, limits_note, status
 from .i18n import L, get_lang, weekday
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
-from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
+from .session_detail import (SessionDetail, details_for, effort_name, fmt_duration,
+                             ultracode_text)
+from .stats import (CTX_BUCKETS, FEW_CALLS, GAP_BUCKETS, LONG_CONTEXT, TOP_REBUILDS, Bucket, Stats,
+                    cache_hit, ctx_growth, timeline_kind)
 from .tips import tips
 from .tooltips import help_mark as qm
+from .waste import advice, bash_note, skills_note
 
 E = html.escape
 
@@ -270,16 +274,29 @@ def _time_chart(stats: Stats) -> str:
             f"</div>")
 
 
-def _groups(stats: Stats, ctx: ReportContext) -> str:
-    total = stats.weighted or 1e-9
+def _activities(stats: Stats, top: int) -> str:
+    return (f"<h2>{L('Na co idą tokeny', 'Where the tokens go')}{qm('activity')}</h2>"
+            + _breakdown_table(stats.by_activity, stats.weighted or 1e-9,
+                               L('czynność', 'activity'), activity_name, top,
+                               L('użyć', 'uses'), 'uses'))
+
+
+def _models(stats: Stats, top: int = 12) -> str:
     model_weight_col = (f"{L('waga', 'weight')}{qm('mweight')}",
                         lambda k: "x" + format(model_weight(k), ".2g"))
     unknown = ""
     if unknown_models():
         unknown = (f"<p class=sub>{L('Nieznane modele liczone z wagą Opus 5', 'Unknown models weighted as Opus 5')}: "
                    f"{E(', '.join(unknown_models()))}</p>")
+    return (f"<h2>{L('Modele', 'Models')}{qm('models')}</h2>"
+            + _breakdown_table(stats.by_model, stats.weighted or 1e-9, 'model', top=top,
+                               extra=model_weight_col) + unknown)
+
+
+def _breakdowns(stats: Stats, ctx: ReportContext) -> str:
+    total = stats.weighted or 1e-9
     agents = ""
-    if stats.by_agent_type:
+    if stats.by_agent_type and not ctx.detail:
         agents = (f"<h2>{L('Subagenci wg typu', 'Subagents by type')}{qm('agents')}</h2>"
                   + _breakdown_table(stats.by_agent_type, total, L('typ', 'type')))
     projects = ""
@@ -287,11 +304,6 @@ def _groups(stats: Stats, ctx: ReportContext) -> str:
         projects = (f"<h2>{L('Projekty', 'Projects')}{qm('projects')}</h2>"
                     + _breakdown_table(stats.by_project, total, L('projekt', 'project')))
     return "\n".join([
-        f"<h2>{L('Na co idą tokeny', 'Where the tokens go')}{qm('activity')}</h2>",
-        _breakdown_table(stats.by_activity, total, L('czynność', 'activity'), activity_name, 20,
-                         L('użyć', 'uses'), 'uses'),
-        f"<h2>{L('Modele', 'Models')}{qm('models')}</h2>"
-        + _breakdown_table(stats.by_model, total, 'model', extra=model_weight_col) + unknown,
         f"<h2>{L('Sesja główna vs subagenci', 'Main session vs subagents')}{qm('side')}</h2>",
         _breakdown_table(stats.by_side, total, L('gdzie', 'where'), side_name),
         agents,
@@ -339,24 +351,135 @@ def _heaviest_sessions(stats: Stats, ctx: ReportContext) -> str:
     if ctx.session:
         return ""
     total = stats.weighted or 1e-9
+    top = sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.rows + (5 if ctx.full else 0)]
+    details = details_for(ctx.calls, ctx.sessions, [k for k, _ in top], ctx.namer)
     rows = ""
-    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:TOP_ROWS + 5]:
+    for key, s in top:
         meta = ctx.sessions.get(key)
         topic = ctx.namer.topic(meta.topic if meta else None)
+        detail = details.get(key)
         rows += (
-            f"<tr><td class=m>{E(key[1][:8])}</td><td>{E(ctx.namer.project(meta, key[0]))}"
+            f"<tr class=sess><td class=m><button type=button class=sbtn aria-expanded=false "
+            f"title='{L('pokaż szczegóły sesji', 'show session details')}'>"
+            f"<i aria-hidden=true>▸</i>{E(key[1][:8])}</button></td>"
+            f"<td>{E(ctx.namer.project(meta, key[0]))}"
             f"</td><td class=n>{fmt_tok(s.raw)}</td><td class=n>{fmt_tok(s.weighted)}</td>"
             f"<td class=n>{pct(s.weighted, total):.1f}%"
             f"</td><td class=n>{s.calls}</td><td class=n>{fmt_tok(s.max_context)}</td>"
             f"<td class=n>{pct(s.subagent_weighted, s.weighted):.0f}%</td>"
             f"<td class=t>{E(topic[:100])}</td></tr>")
+        if detail:
+            rows += (f"<tr class=sdet hidden><td colspan=9>{_session_detail(detail)}</td></tr>")
     return (f"<h2>{L('Najcięższe rozmowy', 'Heaviest conversations')}{qm('sessions')}</h2>"
-            f"<div class=wrap><table><tr><th>{L('sesja', 'session')}</th><th>"
+            f"<p class=sub>{L('Kliknij sesję, żeby zobaczyć jej szczegóły.', 'Click a session to see its details.')}</p>"
+            f"<div class=wrap><table class=sessions><tr><th>{L('sesja', 'session')}</th><th>"
             f"{L('projekt', 'project')}</th><th class=n>{_raw_h()}</th>"
             f"<th class=n>{_weighted_h()}{qm('weighted')}</th>"
             f"<th class=n>%</th><th class=n>{_calls_h()}</th><th class=n>"
             f"{L('maks. ctx', 'max ctx')}{qm('maxctx')}</th><th class=n>{L('subag.', 'sub')}"
             f"{qm('subshare')}</th><th>{L('temat', 'topic')}</th></tr>{rows}</table></div>")
+
+
+# --------------------------------------------------------------------------- one session
+
+def _kv(name: str, value: str) -> str:
+    return f"<dt>{name}</dt><dd>{value}</dd>"
+
+
+def _session_detail(d: SessionDetail) -> str:
+    """everything about one session: used in --session and in the heaviest-conversation rows"""
+    total = d.weighted or 1e-9
+    start, end = d.start.astimezone(), d.end.astimezone()
+    until = f"{end:%H:%M}" if end.date() == start.date() else f"{end:%Y-%m-%d %H:%M}"
+    efforts = " ".join(
+        f"<span class=chip>{E(effort_name(level))} <b>{pct(u.weighted, total):.0f}%</b> "
+        f"<small>{u.calls} {L('wyw.', 'calls')}</small></span>" for level, u in d.efforts)
+    fast = (L(f"{d.fast.calls} wywołań ({pct(d.fast.weighted, total):.0f}% zużycia)",
+              f"{d.fast.calls} calls ({pct(d.fast.weighted, total):.0f}% of usage)")
+            if d.fast.calls else L("nie", "no"))
+    info = [
+        _kv(L("sesja", "session"), f"<span class=m>{E(d.session_id)}</span>"),
+        _kv(L("projekt", "project"), E(d.project) + (
+            f" <span class=few>· {L('gałąź', 'branch')} {E(d.branch)}</span>" if d.branch else "")),
+        _kv(L("czas", "time"), f"{start:%Y-%m-%d %H:%M} → {until} ({fmt_duration(d.duration)})"
+            + (f" <span class=few>· Claude Code {E(d.version)}</span>" if d.version else "")),
+        _kv(L("rozmowa", "conversation"),
+            L(f"prośby: {d.requests}, powiadomienia: {d.notifications}, kompaktowania: "
+              f"{d.compactions}, wywołania: {d.calls}, maks. kontekst {fmt_tok(d.max_context)}",
+              f"{d.requests} requests, {d.notifications} notifications, {d.compactions} "
+              f"compactions, {d.calls} calls, max context {fmt_tok(d.max_context)}")),
+        _kv("cache", L(f"odbudowany od nowa <b>{d.rebuilds.count}×</b>"
+                       + (f" (nadmiar {fmt_tok(d.rebuilds.waste)}, najdłuższa przerwa {d.rebuilds.longest_gap:.0f} min)" if d.rebuilds.count else ""),
+                       f"rewritten <b>{d.rebuilds.count}×</b>"
+                       + (f" (extra {fmt_tok(d.rebuilds.waste)}, longest pause {d.rebuilds.longest_gap:.0f} min)" if d.rebuilds.count else ""))),
+        _kv(L("długi kontekst", "long context"),
+            L(f"<b>{d.long_calls}</b> wywołań na kontekście ≥ {fmt_tok(LONG_CONTEXT)}, kompaktowań: {d.compactions}",
+              f"<b>{d.long_calls}</b> calls at a context ≥ {fmt_tok(LONG_CONTEXT)}, compactions: {d.compactions}")
+            + (L(f" ({fmt_tok(d.long_weighted)} ważonych)", f" ({fmt_tok(d.long_weighted)} weighted)") if d.long_calls else "")),
+        _kv(L("zużycie", "usage"), L(f"<b>{fmt_tok(d.weighted)}</b> ważonych, {fmt_tok(d.raw)} surowych",
+                                     f"<b>{fmt_tok(d.weighted)}</b> weighted, {fmt_tok(d.raw)} raw")),
+        _kv(f"effort{qm('effort')}", efforts),
+        _kv(f"ultracode{qm('ultracode')}", E(ultracode_text(d))),
+        _kv(L("tryb fast", "fast mode"), fast),
+    ]
+    if d.skills:
+        info.append(_kv(L("skille", "skills"), E(", ".join(f"{k} ×{n}"
+                                                            for k, n in d.skills.most_common()))))
+    parts = [f"<dl class=kv>{''.join(info)}</dl>"]
+
+    rows = "".join(
+        f"<tr><td class=m>{E(m.model)}</td><td class=n>{m.calls}</td><td class=n>{m.sub_calls}</td>"
+        f"<td class=n>{fmt_tok(m.tokens['input'])}</td><td class=n>{fmt_tok(m.tokens['cache_read'])}</td>"
+        f"<td class=n>{fmt_tok(m.tokens['cache_write_5m'] + m.tokens['cache_write_1h'])}</td>"
+        f"<td class=n>{fmt_tok(m.tokens['output'])}</td><td class=n>{fmt_tok(m.raw)}</td>"
+        f"<td class=n><b>{fmt_tok(m.weighted)}</b></td><td class=n>{pct(m.weighted, total):.0f}%</td></tr>"
+        for m in d.models)
+    parts.append(
+        f"<h3>{L('Modele', 'Models')}</h3><div class=wrap><table><tr><th>model</th>"
+        f"<th class=n>{_calls_h()}</th><th class=n>{L('w tym subag.', 'of it sub')}</th>"
+        f"<th class=n>{L('wejście', 'input')}</th><th class=n>{L('odczyt cache', 'cache read')}</th>"
+        f"<th class=n>{L('zapis cache', 'cache write')}</th><th class=n>{L('wyjście', 'output')}</th>"
+        f"<th class=n>{L('surowe', 'raw')}</th><th class=n>{_weighted_h()}</th><th class=n>%</th>"
+        f"</tr>{rows}</table></div>")
+
+    if d.agents:
+        rows = "".join(
+            f"<tr><td class=m>{E(a.agent_id[:8])}</td><td>{E(a.agent_type)}</td>"
+            f"<td class=m>{E(', '.join(a.models))}</td><td class=n>{a.calls}</td>"
+            f"<td class=n>{fmt_tok(a.weighted)}</td><td class=n>{pct(a.weighted, total):.0f}%</td>"
+            f"<td class=t title='{E(a.task)}'>{E(a.task)}</td></tr>"
+            for a in d.agents)
+        parts.append(
+            f"<h3>{L('Subagenci', 'Subagents')} ({len(d.agents)})</h3><div class=wrap><table>"
+            f"<tr><th>id</th><th>{L('typ', 'type')}</th><th>{L('modele', 'models')}</th>"
+            f"<th class=n>{_calls_h()}</th><th class=n>{_weighted_h()}</th><th class=n>%</th>"
+            f"<th>{L('zadanie', 'task')}</th></tr>{rows}</table></div>")
+
+    if d.files:
+        rows = "".join(
+            f"<tr><td class=p>{E(f.name)}</td><td class=n>{f.reads}</td><td class=n>{f.edits}</td>"
+            f"<td class=n>{fmt_tok(f.weighted)}</td><td class=n>{pct(f.weighted, total):.0f}%</td></tr>"
+            for f in d.files)
+        more = (f" <span class=few>· {L('pokazano', 'showing')} {len(d.files)} "
+                f"{L('z', 'of')} {d.n_files}</span>" if d.n_files > len(d.files) else "")
+        parts.append(
+            f"<h3>{L('Pliki', 'Files')}{qm('files')}{more}</h3><div class=wrap><table><tr>"
+            f"<th>{L('plik', 'file')}</th><th class=n>{L('odczyty', 'reads')}</th>"
+            f"<th class=n>{L('zmiany', 'edits')}</th><th class=n>{_weighted_h()}</th>"
+            f"<th class=n>%</th></tr>{rows}</table></div>")
+
+    if d.searches:
+        items = "".join(f"<li><code>{E(p)}</code> ×{n}</li>" for p, n in d.searches.most_common())
+        parts.append(f"<h3>{L('Najczęstsze wyszukiwania (Grep/Glob)', 'Most frequent searches (Grep/Glob)')}"
+                     f"</h3><ul class=srch>{items}</ul>")
+    return f"<div class=sd>{''.join(parts)}</div>"
+
+
+def _single_session(ctx: ReportContext) -> str:
+    if not ctx.detail:
+        return ""
+    return (f"<h2>{L('Szczegóły sesji', 'Session details')}</h2>"
+            f"<div class=card>{_session_detail(ctx.detail)}</div>")
 
 
 def _cache_and_repeats(stats: Stats) -> str:
@@ -369,7 +492,101 @@ def _cache_and_repeats(stats: Stats) -> str:
         _card(f"{pct(rb.waste, total):.1f}%", f"{L('zużycia to nadmiar przez wygasły cache', 'of usage was extra from expired cache')} ({fmt_tok(rb.waste)}){qm('waste')}"),
         _card(f"{pct(rr.repeats, rr.reads):.0f}%", f"{L('odczytów plików to powtórki', 'of file reads were repeats')} ({rr.repeats}/{rr.reads}){qm('reread')}"),
         "</div>",
+        _rebuild_details(stats),
+        _long_context(stats),
     ])
+
+
+def _rebuild_details(stats: Stats) -> str:
+    rb = stats.rebuilds
+    if not rb.count:
+        return ""
+    gaps = ", ".join(f"{label} min: <b>{rb.by_gap[label]}</b>" for _, label in GAP_BUCKETS)
+    rows = (f"<tr><th>{L('sesja', 'session')}</th><th class=n>{L('odbudowy', 'rewrites')}</th>"
+            f"<th class=n>{L('nadmiar', 'extra')}</th>"
+            f"<th class=n>{L('najdłuższa przerwa', 'longest pause')}</th></tr>")
+    for key, sr in sorted(rb.by_session.items(), key=lambda kv: -kv[1].waste)[:TOP_REBUILDS]:
+        rows += (f"<tr><td class=m>{E(key[1][:8])}</td><td class=n>{sr.count}</td>"
+                 f"<td class=n>{fmt_tok(sr.waste)}</td><td class=n>{sr.longest_gap:.0f} min</td></tr>")
+    return (f"<p class=sub>{L('Przerwa przed odbudową', 'Pause before the rewrite')}: {gaps}. "
+            f"{L('„< 5 min” to odbudowa bez wygaśnięcia z upływu czasu (np. zmiana modelu lub wcześniejszej części rozmowy).', '“< 5 min” is a rewrite that time did not cause (e.g. a model switch or a change in an earlier part of the conversation).')}</p>"
+            f"<div class=wrap><table>{rows}</table></div>")
+
+
+def _long_context(stats: Stats) -> str:
+    lc = stats.long_context
+    head = f"<h3>{L('Długie rozmowy', 'Long conversations')} — {L('kontekst', 'context')} ≥ {fmt_tok(LONG_CONTEXT)}</h3>"
+    if not lc.calls:
+        return head + f"<p class=sub>{L('Żadna rozmowa nie urosła do tego rozmiaru.', 'No conversation grew to this size.')}</p>"
+    total = stats.weighted or 1e-9
+    return "\n".join([
+        head, "<div class=grid>",
+        _card(str(lc.sessions), L("rozmów z takim kontekstem", "conversations that large")),
+        _card(str(lc.uncompacted_sessions), L("z nich nigdy nie kompaktowanych", "of them never compacted")),
+        _card(f"{pct(lc.weighted, total):.1f}%", f"{L('zużycia to wywołania na dużym kontekście', 'of usage was calls at a large context')} ({lc.calls} {L('wyw.', 'calls')}, {fmt_tok(lc.weighted)})"),
+        "</div>",
+        f"<p class=sub>{L('To zużycie wywołań na dużym kontekście, nie oszczędność z /compact — jej nie da się policzyć, bo nie wiadomo, jak mały byłby kontekst po kompaktowaniu.', 'This is what the calls at a large context used, not a saving from /compact — that cannot be calculated, as the context after compaction is unknown.')}</p>"])
+
+
+def _bash_noise(stats: Stats) -> str:
+    w = stats.waste
+    if not w.bash_results:
+        return ""
+    total = stats.weighted or 1e-9
+    parts = [f"<h2>{L('Szum z poleceń Bash — długie wyniki bez ograniczenia', 'Bash noise — long results with no limit')}{qm('bashnoise')}</h2>",
+             "<div class=grid>",
+             _card(fmt_int(w.bash_results), L("wyników poleceń Bash", "Bash results")),
+             _card(f"~{fmt_tok(w.noisy_tokens)}", L("tokenów w długich wynikach bez ograniczenia", "tokens in long unlimited results")),
+             _card(f"{pct(w.noisy_weighted, total):.1f}%", f"{L('zużycia po uwzględnieniu ponownych odczytów', 'of usage counting the re-reads')} ({fmt_tok(w.noisy_weighted)})"),
+             "</div>",
+             f"<p class=sub>{E(bash_note())}</p>"]
+    if not w.families:
+        parts.append(f"<p class=sub>{L('Żaden rodzaj polecenia nie powtarza się z długim wynikiem.', 'No kind of command repeats with a long result.')}</p>")
+        return "\n".join(parts)
+    rows = (f"<tr><th>{L('polecenie', 'command')}</th><th class=n>{L('długich', 'long')}</th>"
+            f"<th class=n>{L('z', 'of')}</th><th class=n>{L('tokeny', 'tokens')}</th>"
+            f"<th class=n>{L('ważone', 'weighted')}</th><th class=n>max</th>"
+            f"<th>{L('zamiast tego', 'instead')}</th></tr>")
+    for f in w.families:
+        example = "" if stats.hotspots_hidden else \
+            f"<br><span class=few>{L('największe', 'largest')}: {E(f.example.replace(chr(10), ' ')[:90])}</span>"
+        rows += (f"<tr><td class=p>{E(f.name)}</td><td class=n>{f.unlimited}</td><td class=n>{f.runs}</td>"
+                 f"<td class=n>{fmt_tok(f.tokens)}</td><td class=n>{fmt_tok(f.weighted)}</td>"
+                 f"<td class=n>{fmt_tok(f.biggest)}</td><td>{E(advice(f.name))}{example}</td></tr>")
+    parts.append(f"<div class=wrap><table>{rows}</table></div>")
+    return "\n".join(parts)
+
+
+def _skills(stats: Stats, ctx: ReportContext) -> str:
+    sk = stats.waste.skills
+    if not (sk.conversations or sk.used):
+        return ""
+    name = ctx.namer.skill
+    parts = [f"<h2>{L('Skille — które się przydają, a które tylko zajmują kontekst', 'Skills — which ones earn their place and which only take up context')}{qm('skills')}</h2>"]
+    if sk.conversations:
+        parts += ["<div class=grid>",
+                  _card(str(len(sk.available)), L("skilli na liście", "skills listed")),
+                  _card(f"~{fmt_tok(sk.listing_tokens())}", L("tokenów opisów w każdej rozmowie", "tokens of descriptions in every conversation")),
+                  _card(str(len(sk.unused())), f"{L('nieużywanych', 'unused')} (~{fmt_tok(sk.unused_tokens())} {L('tokenów', 'tokens')})"),
+                  "</div>"]
+    parts.append(f"<p class=sub>{E(skills_note())}</p>")
+    rows = ""
+    used = sk.used_rows()
+    if used:
+        rows += f"<tr><th>{L('używane', 'used')}</th><th class=n>{L('rozmowy', 'convs')}</th><th class=n>{L('tokeny opisu', 'description tokens')}</th></tr>"
+        rows += "".join(f"<tr><td class=p>{E(name(r.name))}</td><td class=n>{r.uses}</td>"
+                        f"<td class=n>{r.tokens or '–'}</td></tr>" for r in used[:ctx.rows])
+    unused = sk.unused()
+    if unused:
+        rows += (f"<tr><th>{L('nieużywane', 'unused')}</th><th class=n>{L('wspomniany', 'named')}</th>"
+                 f"<th class=n>{L('tokeny opisu', 'description tokens')}</th></tr>")
+        rows += "".join(f"<tr><td class=p>{E(name(r.name))}</td><td class=n>{r.named_in or '–'}</td>"
+                        f"<td class=n>{r.tokens}</td></tr>" for r in unused[:ctx.rows * 2])
+        if len(unused) > ctx.rows * 2:
+            rows += f"<tr><td colspan=3 class=few>{L('… i ' + str(len(unused) - ctx.rows * 2) + ' kolejnych', '… and ' + str(len(unused) - ctx.rows * 2) + ' more')}</td></tr>"
+    if rows:
+        parts.append(f"<div class=wrap><table>{rows}</table></div>")
+    return "\n".join(parts)
 
 
 def _documented(item: Item) -> str:
@@ -427,14 +644,27 @@ def _project_map(stats: Stats) -> str:
     return "\n".join(parts)
 
 
-def _tips(stats: Stats) -> str:
-    items = "".join(f"<li>{E(t)}</li>" for t in tips(stats))
+_FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache"),
+          ("bash", "--bash"), ("skills", "--skills"), ("map", "--project-map")]
+
+
+def _more(ctx: ReportContext) -> str:
+    missing = [f for key, f in _FLAGS if not ctx.wants(key)]
+    if not missing:
+        return ""
+    flags = " ".join(f"<code>{f}</code>" for f in missing)
+    return (f"<p class=sub>{L('Więcej szczegółów (wygeneruj raport z flagami): ', 'More detail (generate the report with the flags): ')}"
+            f"{flags} {L('albo', 'or')} <code>--full</code> {L('(wszystko).', '(everything).')}</p>")
+
+
+def _tips(stats: Stats, ctx: ReportContext) -> str:
+    items = "".join(f"<li>{E(t)}</li>" for t in tips(stats, ctx))
     return (f"<h2>{L('Co można poprawić', 'What you could improve')}{qm('tips')}</h2>"
             f"<div class=card><ul>{items}</ul></div>")
 
 
 def _footer() -> str:
-    return (f"<footer>{L('Wagi rodzajów: wejście x1, odczyt cache x0.1, zapis cache x1.25 (5 min) / x2 (1 h), wyjście x5; wagi modeli względem Opus 5. Proporcje z cennika API Anthropic (stan 2026-09). Anthropic nie publikuje wzoru limitów subskrypcji — to przybliżenie.', 'Type weights: input x1, cache read x0.1, cache write x1.25 (5 min) / x2 (1 h), output x5; model weights relative to Opus 5. Ratios from Anthropic API pricing (as of 2026-09). Anthropic does not publish the subscription limit formula — this is an approximation.')}\n"
+    return (f"<footer>{L('Wagi rodzajów: wejście x1, odczyt cache x0.1, zapis cache x1.25 (5 min) / x2 (1 h), wyjście x5; wagi modeli względem Opus 5. Proporcje z cennika API Anthropic (stan 2026-10). Anthropic nie publikuje wzoru limitów subskrypcji — to przybliżenie.', 'Type weights: input x1, cache read x0.1, cache write x1.25 (5 min) / x2 (1 h), output x5; model weights relative to Opus 5. Ratios from Anthropic API pricing (as of 2026-10). Anthropic does not publish the subscription limit formula — this is an approximation.')}\n"
             f"{L('Wygenerowano', 'Generated')} {datetime.datetime.now():%Y-%m-%d %H:%M}.</footer>")
 
 
@@ -452,21 +682,37 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         f"<h1>{title} — {E(ctx.label)}</h1>",
         f"<p class=sub>{L('Źródło: lokalne transkrypty Claude Code. Raport nie zużywa tokenów. Najedź lub kliknij „?”, żeby zobaczyć wyjaśnienie.', 'Source: local Claude Code transcripts. This report uses no tokens. Hover or tap “?” for an explanation.')}</p>",
     ])
-    tooltip = f"<div id=tip role=tooltip hidden></div>\n<script>\n{_asset('tooltip.js')}</script>"
+    tooltip = (f"<div id=tip role=tooltip hidden></div>\n<script>\n{_asset('tooltip.js')}"
+               f"{_asset('sessions.js')}</script>")
+    if ctx.short:
+        body = [_summary_cards(stats), _single_session(ctx)]
+        if not ctx.session:
+            body += [_activities(stats, TOP_ROWS) if ctx.shows("activities") else "",
+                     _models(stats) if ctx.shows("models") else "",
+                     _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else ""]
+        body.append(f"<p class=sub>{L('To skrócony raport. Domyślny: bez --short, wszystko: --full.', 'This is the short report. The default one: without --short, everything: --full.')}</p>")
+        return "\n".join([head, *body, _footer(), "</main>", tooltip, "</body></html>"])
+    optional = [
+        _token_types(stats) + _time_chart(stats) if ctx.wants("time") else "",
+        _breakdowns(stats, ctx) if ctx.wants("breakdown") else "",
+        _context_length(stats) + _cache_and_repeats(stats) if ctx.wants("cache") else "",
+        _bash_noise(stats) if ctx.wants("bash") else "",
+        _skills(stats, ctx) if ctx.wants("skills") else "",
+        _project_map(stats) if ctx.wants("map") else "",
+    ]
     return "\n".join([
         head,
         _summary_cards(stats),
+        _single_session(ctx),
         _explanation(),
         _comparison(stats, prev, ctx),
         _daily(daily),
-        _token_types(stats),
-        _time_chart(stats),
-        _groups(stats, ctx),
-        _context_length(stats),
-        _heaviest_sessions(stats, ctx),
-        _cache_and_repeats(stats),
-        _project_map(stats),
-        _tips(stats),
+        _activities(stats, 20 if ctx.full else 8) if ctx.shows("activities") else "",
+        _models(stats, ctx.rows) if ctx.shows("models") and not ctx.detail else "",
+        _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else "",
+        *optional,
+        _tips(stats, ctx) if ctx.shows("tips") else "",
+        _more(ctx),
         _footer(),
         "</main>",
         tooltip,

@@ -199,3 +199,64 @@ def call_activities(call: Call) -> List[Tuple[str, float]]:
     if not tools:
         return [(NO_TOOL, 1.0)]
     return [(classify_tool(name, tool_input), 1.0 / len(tools)) for name, tool_input in tools]
+
+
+# --------------------------------------------------------------------------- command families
+
+_SUBCOMMAND_TOOLS = {"git", "npm", "pnpm", "yarn", "bun", "npx", "bunx", "cargo", "docker",
+                     "podman", "kubectl", "gh", "glab", "pip", "pip3", "uv", "poetry", "go",
+                     "terraform", "helm", "dotnet", "brew", "apt", "apt-get", "make"}
+_GIT_OPTS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree"}
+# commands that bound the output whatever they get; grep & co. only when they filter a pipe
+_ALWAYS_LIMITING = {"head", "tail", "wc", "uniq", "cut", "sort"}
+_PIPE_LIMITING = {"grep", "egrep", "fgrep", "rg", "jq", "awk", "sed", "tr", "xargs"}
+_QUIET_FLAGS = {"-q", "--quiet", "--silent", "--stat", "--shortstat", "--numstat", "--oneline",
+                "--short", "--name-only", "--name-status", "--porcelain", "--no-progress",
+                "-l", "--files-with-matches", "--count", "--max-count", "--bail", "-x",
+                "--maxfail", "--summarize"}
+_STDOUT_REDIRECT = re.compile(r"(?<![\d&])>>?(?!&)")
+
+
+def command_family(command: Any) -> str:
+    """the kind of command, e.g. "git diff", "npm test", "cat" — what a tip can be given for.
+    In a chain (a && b) it is the last command that works on files, whose output usually
+    is the long one."""
+    chain = [w for w, piped in _split_commands(str(command or ""))
+             if not piped and os.path.basename(w[0]) not in _TRIVIAL]
+    for words in chain[-1:]:
+        name = os.path.basename(words[0])
+        if name in _TRIVIAL:
+            continue
+        if name.startswith("python") and len(words) > 2 and words[1] == "-m":
+            return f"python -m {words[2]}"
+        if name not in _SUBCOMMAND_TOOLS:
+            return name
+        args, skip = [], False
+        for word in words[1:]:
+            if skip:
+                skip = False
+            elif name == "git" and word in _GIT_OPTS_WITH_VALUE:
+                skip = True
+            elif not word.startswith("-"):
+                args.append(word)
+        keep = 2 if args[:1] == ["run"] else 1  # "npm run test", not just "npm run"
+        return " ".join([name] + args[:keep])
+    return "?"
+
+
+def limits_output(command: Any) -> bool:
+    """True when the shell line already cuts its output: a quiet / summary flag, a filter in
+    the pipe (head, tail, grep ...) or a redirect to a file"""
+    text = str(command or "")
+    if _STDOUT_REDIRECT.search(text):
+        return True
+    for words, piped in _split_commands(text):
+        name = os.path.basename(words[0])
+        if name in _ALWAYS_LIMITING or (piped and name in _PIPE_LIMITING):
+            return True
+        if name == "sed" and "-n" in words[1:]:
+            return True  # prints only the lines of the chosen range
+        if any(w in _QUIET_FLAGS or w.startswith(("--max-count=", "--progress=quiet"))
+               for w in words[1:]):
+            return True
+    return False

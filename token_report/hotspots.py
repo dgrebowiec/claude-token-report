@@ -466,3 +466,8 @@ def _project_hotspots(root: str, home: str, files: Mapping[str, _Lookup],
         item.linked = not item.documented and _mentions(linked, symbol)
         project.symbols.append(item)
     return project
+
+
+def bash_read_files(command: str) -> List[str]:
+    """files a shell line reads with cat/head/sed/... (relative paths as written)"""
+    return [value for kind, value, _ in _bash_lookups(command) if kind == "bash_file"]

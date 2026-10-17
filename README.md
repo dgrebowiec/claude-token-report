@@ -282,8 +282,10 @@ python3 claude_token_report.py --date 2026-09-15         # one specific day
 python3 claude_token_report.py --from 09-01 --to 09-15   # a date range (inclusive)
 python3 claude_token_report.py --today --diff   # today vs yesterday
 python3 claude_token_report.py -l pl            # Polish
+python3 claude_token_report.py --short          # main numbers, activities, models, heaviest conversations
 python3 claude_token_report.py --list           # recent sessions
-python3 claude_token_report.py --session 1a2b   # one session, usage per request
+python3 claude_token_report.py --session 1a2b   # one session in detail (no value = the latest)
+python3 claude_token_report.py --session 1a2b --short    # only the session details and phases
 python3 claude_token_report.py --html report.html --private   # shareable HTML, no names or prompts
 ```
 
@@ -292,6 +294,27 @@ Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM-DD` (current year), `today`, `yesterday`.
 `--daily` compares every day with the day before it: the change in weighted tokens (▲/▼), cache hit rate,
 usage per call and the activity that changed the most. It works in the terminal and in the HTML report.
 In the HTML report every metric has a `?` you can hover over or tap for an explanation.
+
+`--short` leaves out the long sections at the end (token types, conversation length, expired cache,
+repeated reads, project map, tips) and keeps the summary, activities, models and the heaviest
+conversations. It works with `--html` too.
+
+## One session in detail
+
+`--session <id>` (an id or its prefix from `--list`) adds **SESSION DETAILS** to the report:
+
+- project, git branch, Claude Code version, start, end and duration, requests and compactions
+- every model with its calls (and how many of them subagents made), input, cache read, cache write,
+  output and weighted tokens
+- the effort level of the calls (`low` ... `max`), whether **ultracode** was on (when it was switched
+  on, requests with the `ultracode` keyword, Workflow runs), and fast mode
+- every subagent: type, model, calls, weighted tokens and its task; agents started by a Workflow run
+  are included
+- skills used, the files read and changed (with the share of usage spent on them) and the most
+  frequent searches
+
+In the HTML report you can click any row in **Heaviest conversations** to see the same details
+for that session.
 
 ## Project map: what to put in CLAUDE.md
 
@@ -325,6 +348,75 @@ and [the Claude Code docs](https://code.claude.com/docs/en/memory) advise keepin
 moving guidance for one part of the code to `.claude/rules/` with a `paths:` field.
 With `--private` the section is hidden, since file and class names reveal the project.
 
+## Sections: default, optional and `--full`
+
+The default report is short (about 75 lines): the summary, where the tokens go, models, the
+heaviest conversations and **what you could improve**. A tip about something that is not shown
+ends with the flag that shows it (`Details: --cache`). Add sections as you need them; the same
+flags work for `--html`:
+
+| Flag | Adds |
+| :--- | :--- |
+| `--time` | token types (raw vs weighted) and usage over time |
+| `--breakdown` | main session vs subagents, subagent types, projects |
+| `--cache` | conversation length, expired cache, repeated file reads |
+| `--bash` | Bash noise (below) |
+| `--skills` | skills (below) |
+| `--project-map` | the project map (above) |
+| `--full` | every section and longer tables |
+
+`--short` is still the shortest report, without the tips. Flags combine:
+`token_report --bash --skills --html report.html`.
+
+## Configure the report interactively
+
+```bash
+claude-token-report --configure        # or: python3 -m token_report --configure
+```
+
+A full-screen editor (like `claude-statusline configure`) with a live list of what the report
+will contain:
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓` (or `k` `j`) | select an element |
+| `space` (or a digit `1`-`9`, `0`) | show / hide the element |
+| `←` `→` | detail level: `minimal`, `normal`, `detailed` |
+| `a` / `n` | all elements / none |
+| `r` | reset to defaults |
+| `enter` | save and exit |
+| `q` / `Esc` | quit (asks again if there are unsaved changes) |
+
+Levels: `minimal` is the `--short` report (only activities, models and heaviest conversations
+can be chosen), `normal` the default one, `detailed` has the long tables of `--full`. Elements:
+`activities`, `models`, `sessions`, `tips`, plus the optional sections `time`, `breakdown`,
+`cache`, `bash`, `skills`, `map`. When stdin is not a terminal it falls back to text commands,
+one per line (`<n>` toggles, `l` level, `a`, `n`, `r`, `w` save, `q` quit).
+
+The choice is saved in `~/.claude/claude-token-report.json` (override with
+`CLAUDE_TOKEN_REPORT_CONFIG`) and applies to every text and `--html` report. Any of `--short`,
+`--full` or a section flag (`--cache`, `--bash` ...) overrides it for that run; `--no-config`
+ignores it.
+
+## Bash noise and skills
+
+Two sections look for avoidable cost:
+
+- **BASH NOISE**: shell results of 2000 tokens or more (estimated as 4 characters per token)
+  from a command with no quiet flag (`-q`, `--stat`, `--oneline` ...), no filter in the pipe
+  (`head`, `tail`, `grep`, `wc` ...) and no redirect to a file. A result stays in the
+  conversation and is re-read on every following call, so the report also gives it a
+  *weighted* cost, and per kind of command (`git diff`, `npm test`, `cat` ...) a cheaper way to run it.
+  In a chain (`a && b`) the last command counts. Not every long result is waste: sometimes you
+  need all of it.
+- **SKILLS**: the skills Claude Code listed at the start of your conversations, which of them you
+  used (the `Skill` tool or a typed `/name`), and which only add their description to every
+  conversation. `named` marks an unused skill whose name appears in a request (names containing
+  `-`, `_` or `:`), as a command, or as a file extension (`pdf`, `docx`) - a hint, not proof it fitted.
+
+Tips at the end of the report summarise both. With `--private` skill names are replaced with
+`skill-N` and example commands are hidden.
+
 ## Two measures
 
 This report is for Claude **subscriptions** (Pro/Max), so it shows no money, only tokens.
@@ -332,7 +424,7 @@ This report is for Claude **subscriptions** (Pro/Max), so it shows no money, onl
 | measure | what it is |
 |---|---|
 | **raw tokens** | all text that went through the model, every token counted the same. The model re-reads the whole conversation on every call, so this is huge and mostly cheap cache reads. |
-| **weighted tokens** | the main measure: each token counted by how heavily it uses your limit. Cache read x0.1, new input x1, cache write x1.25 (5 min) / x2 (1 h), output x5, times the model weight (Opus 5 x1, Opus 5.5 x0.8, Sonnet 5 / 5.5 x0.4, Haiku 4.5 x0.2, Fable 5.x x2). |
+| **weighted tokens** | the main measure: each token counted by how heavily it uses your limit. Cache read x0.1, new input x1, cache write x1.25 (5 min) / x2 (1 h), output x5, times the model weight (Opus 5 x1, Opus 5.5 x0.8, Sonnet 5 / 5.5 x0.4, Haiku 4.5 x0.2, Haiku 5.5 x0.02 (x0.1 for prompts over 100k tokens), Fable 5.x x2). |
 
 The weights are the price ratios from Anthropic's public API pricing. Anthropic does not publish the formula
 behind subscription limits, so the report assumes limits count tokens in the same proportions. That is an
@@ -359,6 +451,7 @@ Official sources for the prices and the cache durations (5 minutes / 1 hour):
 | `classify.py` | which activity a call belongs to (tool, kind of shell command) |
 | `stats.py` | aggregates calls into `Stats` (by activity, model, project, day, context size...) |
 | `hotspots.py` | the project map: repeated lookups per project vs. `CLAUDE.md` and rules |
+| `waste.py` | long unlimited shell results and unused / unnamed skills |
 | `daily.py`, `tips.py` | the `--daily` comparison and the suggestions |
 | `periods.py` | `--days/--date/--from...` time windows |
 | `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |

@@ -81,8 +81,24 @@ HELP = {  # tooltip texts for the "?" marks in the HTML report: key -> (pl, en)
                 "The part of a call spent only on re-reading the conversation. It grows with "
                 "the conversation's length."),
     "sessions": ("Najcięższe rozmowy (razem z ich subagentami). Temat = Twoja pierwsza prośba. "
-                 "Szczegóły: --session <id>.", "The heaviest conversations (including their "
-                 "subagents). Topic = your first request. Details: --session <id>."),
+                 "Kliknij wiersz, żeby zobaczyć szczegóły sesji: modele, effort, ultracode, "
+                 "subagentów i pliki.", "The heaviest conversations (including their "
+                 "subagents). Topic = your first request. Click a row to see the session's "
+                 "details: models, effort, ultracode, subagents and files."),
+    "effort": ("Poziom effort (ile model myśli i jak dokładnie pracuje), z jakim szły wywołania, "
+               "i jaka część zużycia sesji na niego przypadła.",
+               "The effort level (how much the model thinks and how thorough it is) the calls "
+               "ran with, and the share of the session's usage at each level."),
+    "ultracode": ("Ultracode = effort xhigh plus automatyczne uruchamianie wielu agentów "
+                  "narzędziem Workflow. Pokazuje, kiedy go włączono, prośby ze słowem "
+                  "„ultracode” i liczbę uruchomień Workflow.",
+                  "Ultracode = xhigh effort plus automatically running many agents with the "
+                  "Workflow tool. Shows when it was switched on, requests with the 'ultracode' "
+                  "keyword and the number of Workflow runs."),
+    "files": ("Pliki przeczytane (Read, cat/head/sed) i zmienione (Edit/Write). „ważone” = część "
+              "wywołań, w których model sięgnął po plik.",
+              "Files read (Read, cat/head/sed) and changed (Edit/Write). 'weighted' = the share "
+              "of the calls in which the model used the file."),
     "maxctx": ("Do jakiego rozmiaru (w tokenach) urosła główna rozmowa.",
                "How large (in tokens) the main conversation grew."),
     "subshare": ("Jaka część zużycia tej sesji przypadła na subagentów.",
@@ -104,6 +120,22 @@ HELP = {  # tooltip texts for the "?" marks in the HTML report: key -> (pl, en)
                    "Files and symbols (classes, functions) Claude looked up in several "
                    "conversations — each new conversation finds them from scratch. One line in "
                    "CLAUDE.md saves that search. 'large' = over 800 lines, read in pieces."),
+    "bashnoise": ("Polecenia powłoki, których wynik był długi (≥ 2000 tokenów), a samo polecenie "
+                  "nie miało flagi ciszy, filtra w potoku ani przekierowania. Wynik zostaje w "
+                  "rozmowie i jest czytany ponownie przy każdym kolejnym wywołaniu, dlatego "
+                  "kolumna „ważone” jest dużo większa niż sama długość wyniku.",
+                  "Shell commands whose result was long (≥ 2000 tokens) while the command had no "
+                  "quiet flag, pipe filter or redirect. The result stays in the conversation and "
+                  "is re-read on every following call, so the 'weighted' column is much larger "
+                  "than the result's own length."),
+    "skills": ("Skille wpisane na starcie rozmowy: każdy dokłada swój opis do każdej rozmowy, "
+               "także gdy go nie używasz. „Nieużywane” = ani razu nie wywołane w tym okresie. "
+               "„Wspomniane” = nazwa pada w prośbie, poleceniu lub jako rozszerzenie pliku, a "
+               "skill nie został wywołany.",
+               "Skills listed at the start of a conversation: each adds its description to every "
+               "conversation, even when you don't use it. 'Unused' = never invoked in this "
+               "period. 'Named' = the name appears in a request, a command or as a file "
+               "extension while the skill was not invoked."),
     "tips": ("Wskazówki wyliczone automatycznie z liczb powyżej.",
              "Suggestions computed automatically from the numbers above."),
     "compare": ("Te same miary dla poprzedniego okresu o tej samej długości.",

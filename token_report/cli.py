@@ -8,8 +8,8 @@ import sys
 import urllib.parse
 from typing import List, Optional, Sequence
 
-from . import __version__, i18n
-from .context import ReportContext
+from . import __version__, configure, i18n, settings as settings_module
+from .context import SECTIONS, ReportContext
 from .daily import DayRow, daily_rows, daily_series
 from .explain import explain_text
 from .formatting import fmt_tok
@@ -19,6 +19,7 @@ from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
 from .report_text import session_list, text_daily, text_diff, text_report
+from .session_detail import session_detail
 from .stats import aggregate
 from .transcripts import Call, default_root, find_session, load, recent_sessions
 
@@ -40,7 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Dwie miary:\n"
             "  tokeny surowe   cały tekst, który przeszedł przez model, każdy token po równo\n"
             "  tokeny ważone   te same tokeny liczone wg obciążenia limitu: odczyt z cache x0.1,\n"
-            "                  zapis x1.25, odpowiedź x5, razy waga modelu (Opus 5 x1, Sonnet 5 x0.4)\n"
+            "                  zapis x1.25 (x2 przy cache 1 h), odpowiedź x5, razy waga modelu\n"
+            "                  (Opus 5 x1, Sonnet 5 x0.4)\n"
             "Pełne wyjaśnienie i skąd wagi: --explain",
             "Report for Claude subscriptions (Pro/Max): where exactly your Claude Code tokens go.\n"
             "Reads only the local transcripts (~/.claude/projects), sends nothing, uses no\n"
@@ -48,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Two measures:\n"
             "  raw tokens       all text that went through the model, every token counted the same\n"
             "  weighted tokens  the same tokens counted by load on your limit: cache read x0.1,\n"
-            "                   write x1.25, output x5, times the model weight (Opus 5 x1, Sonnet 5 x0.4)\n"
+            "                   write x1.25 (x2 at 1 h cache), output x5, times the model weight\n"
+            "                   (Opus 5 x1, Sonnet 5 x0.4)\n"
             "Full explanation and where the weights come from: --explain"),
         epilog=L(
             "przykłady:\n"
@@ -59,7 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s -l pl --from 09-01 --to 09-15 --daily   zakres dat, dzień po dniu\n"
             "  %(prog)s -l pl --today --diff          dzisiaj vs wczoraj\n"
             "  %(prog)s -l pl --list                  ostatnie sesje\n"
-            "  %(prog)s -l pl --session 1a2b3c        jedna sesja z fazami (id lub prefiks)\n"
+            "  %(prog)s -l pl --short                 skrócony raport\n"
+            "  %(prog)s -l pl --bash --skills         domyślny raport + szum z Bash i skille\n"
+            "  %(prog)s -l pl --full                  wszystkie sekcje\n"
+            "  %(prog)s -l pl --session 1a2b3c        szczegóły jednej sesji (id lub prefiks)\n"
             "  %(prog)s -l pl --html raport.html --daily --private   HTML do udostępnienia\n\n"
             "daty: RRRR-MM-DD, DD.MM.RRRR, MM-DD (bieżący rok), today, yesterday",
             "examples:\n"
@@ -70,15 +76,18 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s --from 09-01 --to 09-15 --daily   a date range, day by day\n"
             "  %(prog)s --today --diff                today vs yesterday\n"
             "  %(prog)s --list                        recent sessions\n"
-            "  %(prog)s --session 1a2b3c              one session with its phases (id or prefix)\n"
+            "  %(prog)s --short                       short report\n"
+            "  %(prog)s --bash --skills               default report + Bash noise and skills\n"
+            "  %(prog)s --full                        every section\n"
+            "  %(prog)s --session 1a2b3c              one session in detail (id or prefix)\n"
             "  %(prog)s --html report.html --daily --private   shareable HTML\n"
             "  %(prog)s -l pl                         Polish output\n\n"
             "dates: YYYY-MM-DD, DD.MM.YYYY, MM-DD (current year), today, yesterday"))
     g = ap.add_argument_group(L("okres (wybierz jeden sposób; domyślnie ostatnie 7 dni)",
                                 "time window (pick one; default: last 7 days)"))
     g.add_argument("--days", "-d", type=float, default=None, metavar="N",
-                   help=L("ostatnie N dni kalendarzowych, łącznie z dzisiaj",
-                          "last N calendar days, including today"))
+                   help=L("ostatnie N dni kalendarzowych, łącznie z dzisiaj; ułamek N daje okno N×24 h",
+                          "last N calendar days, including today; a fraction N gives an N×24 h window"))
     g.add_argument("--date", type=parse_day, metavar=L("DZIEŃ", "DAY"),
                    help=L("jeden konkretny dzień", "one specific day"))
     g.add_argument("--from", dest="from_", type=parse_day, metavar=L("DZIEŃ", "DAY"),
@@ -90,8 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--yesterday", "-y", action="store_true", help=L("tylko wczoraj", "yesterday only"))
     g.add_argument("--all", action="store_true", help=L("cała historia", "all history"))
     g.add_argument("--rolling", action="store_true",
-                   help=L("z --days: okno N×24h zamiast pełnych dni",
-                          "with --days: N×24h window instead of calendar days"))
+                   help=L("okno N×24h zamiast pełnych dni; bez --days domyślnie 7×24h",
+                          "N×24h window instead of calendar days; without --days, 7×24h by default"))
     g = ap.add_argument_group(L("porównania", "comparisons"))
     g.add_argument("--daily", action="store_true",
                    help=L("dzień po dniu: wzrost/spadek każdego dnia względem poprzedniego",
@@ -101,15 +110,54 @@ def build_parser() -> argparse.ArgumentParser:
                           "compare with the previous window of the same length"))
     g = ap.add_argument_group(L("zakres i widok", "scope and view"))
     g.add_argument("--session", "-s", metavar="ID", nargs="?", const="latest",
-                   help=L("jedna sesja (id/prefiks; bez wartości = najnowsza)",
-                          "one session (id/prefix; no value = latest)"))
+                   help=L("jedna sesja w szczegółach: modele, effort, ultracode, subagenci, "
+                          "pliki (id/prefiks; bez wartości = najnowsza)",
+                          "one session in detail: models, effort, ultracode, subagents, files "
+                          "(id/prefix; no value = latest)"))
+    g.add_argument("--short", action="store_true",
+                   help=L("skrócony raport: główne liczby, czynności, modele i najcięższe rozmowy",
+                          "short report: main numbers, activities, models and heaviest "
+                          "conversations"))
     g.add_argument("--list", metavar="N", nargs="?", type=int, const=15,
                    help=L("pokaż ostatnie sesje", "list recent sessions"))
+    g = ap.add_argument_group(L("sekcje (domyślnie: podsumowanie, czynności, modele, najcięższe "
+                                "rozmowy i wskazówki)",
+                                "sections (default: summary, activities, models, heaviest "
+                                "conversations and tips)"))
+    g.add_argument("--bash", action="store_true",
+                   help=L("szum z poleceń Bash: długie wyniki bez ograniczenia",
+                          "Bash noise: long results with no limit"))
+    g.add_argument("--skills", action="store_true",
+                   help=L("skille: używane, nieużywane, ich koszt w kontekście",
+                          "skills: used, unused, their cost in the context"))
+    g.add_argument("--project-map", dest="map", action="store_true",
+                   help=L("mapa projektu: czego Claude szuka w kółko vs. CLAUDE.md",
+                          "project map: what Claude looks up again and again vs. CLAUDE.md"))
+    g.add_argument("--cache", action="store_true",
+                   help=L("cache i długość rozmowy: wygasły cache, powtórne odczyty, rozmiar kontekstu",
+                          "cache and conversation length: expired cache, repeated reads, context size"))
+    g.add_argument("--time", action="store_true",
+                   help=L("rodzaje tokenów i zużycie w czasie", "token types and usage over time"))
+    g.add_argument("--breakdown", action="store_true",
+                   help=L("podział: sesja główna vs subagenci, typy subagentów, projekty",
+                          "breakdown: main session vs subagents, subagent types, projects"))
+    g.add_argument("--full", action="store_true",
+                   help=L("wszystkie sekcje i dłuższe tabele", "every section and longer tables"))
     g = ap.add_argument_group(L("wyjście", "output"))
     g.add_argument("--html", metavar=L("PLIK", "FILE"), help=L("zapisz raport HTML", "write an HTML report"))
     g.add_argument("--private", action="store_true",
                    help=L("ukryj nazwy projektów, plików i treść próśb (do udostępniania)",
                           "hide project/file names and prompt text (for sharing)"))
+    g.add_argument("--configure", action="store_true",
+                   help=L("interaktywnie wybierz poziom szczegółowości (minimal / normal / "
+                          "detailed) i elementy raportu; zapisane ustawienia działają, gdy nie "
+                          "podasz flag sekcji",
+                          "interactively pick the detail level (minimal / normal / detailed) and "
+                          "the report elements; the saved choice applies when you pass no "
+                          "section flags"))
+    g.add_argument("--no-config", action="store_true",
+                   help=L("zignoruj zapisane ustawienia (--configure) w tym uruchomieniu",
+                          "ignore the saved settings (--configure) for this run"))
     g.add_argument("--explain", action="store_true",
                    help=L("wyjaśnij tokeny surowe i ważone", "explain raw and weighted tokens"))
     g.add_argument("--lang", "-l", choices=list(i18n.SUPPORTED), default="en",
@@ -141,6 +189,12 @@ def _daily_rows(window: Window, calls: List[Call], current: List[Call]) -> List[
     return daily_rows(daily_series(calls, series_from, last), has_base)
 
 
+def _saved_settings(args: argparse.Namespace) -> Optional[settings_module.Settings]:
+    """the settings saved by --configure, unless this run picks its own sections"""
+    own = args.short or args.full or any(getattr(args, k) for k in SECTIONS)
+    return None if own or args.no_config else settings_module.load()
+
+
 def _write_html(path: str, page: str, n_calls: int, weighted: float) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
@@ -160,6 +214,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     if args.explain:
         print(explain_text())
+        return
+    if args.configure:
+        configure.main()
         return
     root = args.dir or default_root()
     if not os.path.isdir(root):
@@ -199,7 +256,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         label += "  (" + namer.project(sessions.get(session_key), session_key[0]) + ")"
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
                         sessions=sessions, namer=namer,
-                        calls=current, session=args.session, session_key=session_key)
+                        calls=current, session=args.session, session_key=session_key,
+                        short=args.short, full=args.full,
+                        sections=frozenset(k for k in SECTIONS if getattr(args, k)))
+    saved = _saved_settings(args)
+    if saved:
+        shown = saved.shown()
+        ctx.short, ctx.full = saved.level == "minimal", saved.level == "detailed"
+        ctx.only_chosen = True
+        ctx.sections = frozenset(k for k in SECTIONS if k in shown)
+        ctx.core = frozenset(k for k in settings_module.CORE if k in shown)
+    if session_key:
+        ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)
     prev_stats = None
     if prev_start is not None:

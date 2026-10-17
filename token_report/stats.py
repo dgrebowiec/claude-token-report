@@ -4,7 +4,8 @@ from __future__ import annotations
 import collections
 import datetime
 from dataclasses import dataclass, field
-from typing import Counter, DefaultDict, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import (Counter, DefaultDict, Dict, Iterable, Iterator, List, Mapping, NamedTuple,
+                    Optional, Tuple)
 
 from .classify import call_activities
 from .formatting import pct
@@ -13,6 +14,7 @@ from .i18n import L, weekday
 from .naming import Namer
 from .pricing import cache_rewrite_waste, context_size
 from .transcripts import Call, FileKey, SessionKey, SessionMeta
+from .waste import Waste, find_waste
 
 # (from, to, label) — calls are grouped by how long the conversation was at that moment
 CTX_BUCKETS = [(0, 50e3, "< 50k"), (50e3, 100e3, "50-100k"), (100e3, 200e3, "100-200k"),
@@ -21,6 +23,9 @@ LONG_CTX_BUCKETS = ("200-300k", "300k+")
 MIN_REBUILD_CTX = 20000
 FEW_CALLS = 30  # groups with fewer calls are marked as unreliable
 TOP_REBUILDS = 5
+LONG_CONTEXT = 150_000  # a main-conversation call with at least this much context counts as "long"
+# (upper gap in minutes, label): how long the pause before an expired-cache call was
+GAP_BUCKETS = [(5, "< 5"), (60, "5-60"), (float("inf"), "> 60")]
 MAX_TIMELINE_DAYS = 31  # longer periods are shown by week
 
 _EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -76,6 +81,9 @@ class SessionStats:
     calls: int = 0
     subagent_weighted: float = 0.0
     max_context: int = 0  # of the main conversation
+    long_calls: int = 0  # main-conversation calls with context >= LONG_CONTEXT
+    long_weighted: float = 0.0
+    compactions: int = 0
 
 
 class RebuildEvent(NamedTuple):
@@ -86,12 +94,35 @@ class RebuildEvent(NamedTuple):
     gap_minutes: float
 
 
+def gap_bucket(minutes: float) -> str:
+    return next(label for hi, label in GAP_BUCKETS if minutes < hi)
+
+
+@dataclass
+class SessionRebuilds:
+    count: int = 0
+    waste: float = 0.0
+    longest_gap: float = 0.0  # minutes
+
+
 @dataclass
 class Rebuilds:
     """calls where an expired cache made the whole conversation be written again"""
     count: int = 0
     waste: float = 0.0
     top: List[RebuildEvent] = field(default_factory=list)
+    by_gap: Counter[str] = field(default_factory=collections.Counter)
+    by_session: DefaultDict[SessionKey, SessionRebuilds] = field(
+        default_factory=lambda: collections.defaultdict(SessionRebuilds))
+
+
+@dataclass
+class LongContext:
+    """main-conversation calls made with a context of LONG_CONTEXT tokens or more"""
+    calls: int = 0
+    weighted: float = 0.0
+    sessions: int = 0  # sessions with at least one such call
+    uncompacted_sessions: int = 0  # ... of which never compacted
 
 
 @dataclass
@@ -126,8 +157,10 @@ class Stats:
     by_session: DefaultDict[SessionKey, SessionStats] = field(
         default_factory=lambda: collections.defaultdict(SessionStats))
     rebuilds: Rebuilds = field(default_factory=Rebuilds)
+    long_context: LongContext = field(default_factory=LongContext)
     rereads: Rereads = field(default_factory=Rereads)
     hotspots: List[ProjectHotspots] = field(default_factory=list)
+    waste: Waste = field(default_factory=Waste)
     hotspots_hidden: bool = False  # --private: symbol and file names would reveal the project
     n_sessions: int = 0
     n_subagents: int = 0
@@ -183,10 +216,20 @@ def aggregate(calls: List[Call], sessions: Mapping[SessionKey, SessionMeta],
         _add_call(stats, call, sessions, namer)
         by_file[call.file_key].append(call)
     stats.rebuilds = _find_rebuilds(by_file)
+    for key, sess in stats.by_session.items():
+        meta = sessions.get(key)
+        sess.compactions = len(meta.compactions) if meta else 0
+        if sess.long_calls:
+            lc = stats.long_context
+            lc.sessions += 1
+            lc.calls += sess.long_calls
+            lc.weighted += sess.long_weighted
+            lc.uncompacted_sessions += not sess.compactions
     stats.rereads = _find_rereads(by_file, sessions, namer)
     if hotspots:
         stats.hotspots_hidden = namer.private
         stats.hotspots = [] if namer.private else find_hotspots(calls, sessions)
+        stats.waste = find_waste(calls, sessions)
     stats.n_sessions = len(stats.by_session)
     stats.n_subagents = len({c.file_key for c in calls if c.is_subagent})
     return stats
@@ -236,21 +279,38 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
         s.subagent_weighted += w
     else:
         s.max_context = max(s.max_context, call.context)
+        if call.context >= LONG_CONTEXT:
+            s.long_calls += 1
+            s.long_weighted += w
+
+
+def iter_rebuilds(calls: Iterable[Call]) -> Iterator[Tuple[Call, float, float]]:
+    """(call, minutes since the previous call of the same file, extra weight) for every call
+    where an expired cache made most of the context be written again"""
+    by_file: DefaultDict[FileKey, List[Call]] = collections.defaultdict(list)
+    for call in calls:
+        by_file[call.file_key].append(call)
+    for file_calls in by_file.values():
+        for prev, call in zip(file_calls, file_calls[1:]):
+            written = call.tokens["cache_write_5m"] + call.tokens["cache_write_1h"]
+            if call.context < MIN_REBUILD_CTX or written < 0.5 * call.context:
+                continue
+            gap = (call.time - prev.time).total_seconds() / 60
+            yield call, gap, cache_rewrite_waste(call.tokens, call.model)
 
 
 def _find_rebuilds(by_file: Mapping[FileKey, List[Call]]) -> Rebuilds:
     """expired cache: the context was mostly written again instead of read from the cache"""
     out = Rebuilds()
-    for file_key, calls in by_file.items():
-        for prev, call in zip(calls, calls[1:]):
-            written = call.tokens["cache_write_5m"] + call.tokens["cache_write_1h"]
-            if call.context < MIN_REBUILD_CTX or written < 0.5 * call.context:
-                continue
-            waste = cache_rewrite_waste(call.tokens, call.model)
-            gap = (call.time - prev.time).total_seconds() / 60
-            out.count += 1
-            out.waste += waste
-            out.top.append(RebuildEvent(waste, call.time, file_key, call.context, gap))
+    for call, gap, waste in iter_rebuilds(c for calls in by_file.values() for c in calls):
+        out.count += 1
+        out.waste += waste
+        out.by_gap[gap_bucket(gap)] += 1
+        s = out.by_session[call.session_key]
+        s.count += 1
+        s.waste += waste
+        s.longest_gap = max(s.longest_gap, gap)
+        out.top.append(RebuildEvent(waste, call.time, call.file_key, call.context, gap))
     out.top.sort(key=lambda e: -e.waste)
     out.top = out.top[:TOP_REBUILDS]
     return out

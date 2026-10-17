@@ -9,6 +9,7 @@ Modules, in the order data flows through them:
   classify     which activity (tool / kind of shell command) a call belongs to
   stats        aggregate calls into Stats; daily: the --daily comparison; tips: suggestions
   hotspots     the project map: what Claude keeps looking up vs. what CLAUDE.md says
+  waste        long shell output nobody limited, and skills that are never used
   report_text / report_html   render the reports; cli: the command line
 """
-__version__ = "1.1.0"  # bump on every release, or `pipx upgrade` won't see it
+__version__ = "1.2.0"  # bump on every release, or `pipx upgrade` won't see it

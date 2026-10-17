@@ -14,8 +14,11 @@ from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, column_name, limits_note, s
 from .i18n import L, weekday
 from .naming import Namer
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
-from .stats import CTX_BUCKETS, FEW_CALLS, Bucket, Stats, cache_hit, ctx_growth, timeline_kind
+from .session_detail import SessionDetail, effort_name, fmt_duration, ultracode_text
+from .stats import (CTX_BUCKETS, FEW_CALLS, GAP_BUCKETS, LONG_CONTEXT, TOP_REBUILDS, Bucket, Stats,
+                    cache_hit, ctx_growth, timeline_kind)
 from .tips import tips
+from .waste import advice, bash_note, skills_note
 from .transcripts import TranscriptFile, load
 
 WIDTH = 92
@@ -125,17 +128,8 @@ def _token_types(out: _Lines, stats: Stats) -> None:
                "Weighted also includes the model's weight (see MODELS)."))
 
 
-def _groups(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
-    total = stats.weighted
-    _breakdown(out, L("NA CO IDĄ TOKENY", "WHERE THE TOKENS GO"), stats.by_activity, total,
-               TOP_ROWS + 6, L("czynność", "activity"), activity_name, n_label=L("użyć", "uses"),
-               desc=L("Każde wywołanie jest przypisane do narzędzia, którego model w nim użył (przy "
-                      "kilku narzędziach naraz — po równo). „Bez narzędzia” = model odpowiedział Ci "
-                      "tekstem. „śr./szt.” = ile średnio waży jedno użycie.",
-                      "Each call is assigned to the tool the model used in it (split evenly if it "
-                      "used several). 'No tool' = the model replied to you with text. 'avg' = the "
-                      "average weight of one use."))
-    _breakdown(out, L("MODELE", "MODELS"), stats.by_model, total, TOP_ROWS, "model",
+def _models(out: _Lines, stats: Stats, top: int = TOP_ROWS) -> None:
+    _breakdown(out, L("MODELE", "MODELS"), stats.by_model, stats.weighted, top, "model",
                extra=(L("waga", "weight"), lambda k: "x" + format(model_weight(k), ".2g")),
                desc=L("„waga” = jak mocno model obciąża limit względem Opus 5 (x1). Ta sama praca "
                       "na modelu z wagą x0.4 zużywa 2.5 raza mniej.",
@@ -144,13 +138,28 @@ def _groups(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
     if unknown_models():
         out.note(L("nieznane modele liczone z wagą Opus 5: ", "unknown models weighted as Opus 5: ")
                  + ", ".join(unknown_models()))
+
+
+def _activities(out: _Lines, stats: Stats, top: int) -> None:
+    _breakdown(out, L("NA CO IDĄ TOKENY", "WHERE THE TOKENS GO"), stats.by_activity,
+               stats.weighted, top, L("czynność", "activity"), activity_name, n_label=L("użyć", "uses"),
+               desc=L("Każde wywołanie jest przypisane do narzędzia, którego model w nim użył (przy "
+                      "kilku narzędziach naraz — po równo). „Bez narzędzia” = model odpowiedział Ci "
+                      "tekstem. „śr./szt.” = ile średnio waży jedno użycie.",
+                      "Each call is assigned to the tool the model used in it (split evenly if it "
+                      "used several). 'No tool' = the model replied to you with text. 'avg' = the "
+                      "average weight of one use."))
+
+
+def _breakdowns(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
+    total = stats.weighted
     _breakdown(out, L("SESJA GŁÓWNA vs SUBAGENCI", "MAIN SESSION vs SUBAGENTS"), stats.by_side,
                total, 2, L("gdzie", "where"), side_name,
                desc=L("Subagenci to osobne instancje Claude uruchamiane narzędziem Agent. Mają "
                       "własny kontekst, więc ich praca nie wydłuża głównej rozmowy.",
                       "Subagents are separate Claude instances started with the Agent tool. They "
                       "have their own context, so their work doesn't grow the main conversation."))
-    if stats.by_agent_type:
+    if stats.by_agent_type and not ctx.detail:
         _breakdown(out, L("SUBAGENCI WG TYPU", "SUBAGENTS BY TYPE"), stats.by_agent_type, total,
                    TOP_ROWS, L("typ subagenta", "subagent type"))
     if not ctx.session:
@@ -220,14 +229,14 @@ def _over_time(out: _Lines, stats: Stats) -> None:
                 + "".join(f"{fmt_tok(p.activities[activity]):>8}" for _, p in view))
 
 
-def _heaviest_sessions(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
+def _heaviest_sessions(out: _Lines, stats: Stats, ctx: ReportContext, top: int = TOP_ROWS) -> None:
     total = stats.weighted or 1e-9
     out.header(L("NAJCIĘŻSZE ROZMOWY", "HEAVIEST CONVERSATIONS"))
     out.add(f" {L('sesja', 'session'):<10}{L('projekt', 'project'):<22}{L('surowe', 'raw'):>8}"
             f"{L('ważone', 'weighted'):>10}"
             f"{'%':>7}{L('wywoł.', 'calls'):>7}{L('maks.ctx', 'max ctx'):>9}"
             f"{L('subag.', 'sub'):>7}  {L('temat', 'topic')}")
-    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:TOP_ROWS]:
+    for key, s in sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:top]:
         meta = ctx.sessions.get(key)
         project = ctx.namer.project(meta, key[0])
         topic = ctx.namer.topic(meta.topic if meta else None)
@@ -239,6 +248,108 @@ def _heaviest_sessions(out: _Lines, stats: Stats, ctx: ReportContext) -> None:
                "--session <id>",
                "'max ctx' = how large the conversation grew; 'sub' = the share of this "
                "session's usage spent by subagents. One session in detail: --session <id>"))
+
+
+def _short_model(model: str) -> str:
+    return model[len("claude-"):] if model.startswith("claude-") else model
+
+
+def _session_info(out: _Lines, d: SessionDetail) -> None:
+    out.header(L("SZCZEGÓŁY SESJI", "SESSION DETAILS"))
+
+    def item(name: str, value: str) -> None:
+        lines = textwrap.wrap(value, WIDTH - 18) or [""]
+        out.add(f" {name:<16} {lines[0]}")
+        for line in lines[1:]:
+            out.add(" " * 18 + line)
+
+    start, end = d.start.astimezone(), d.end.astimezone()
+    until = f"{end:%H:%M}" if end.date() == start.date() else f"{end:%Y-%m-%d %H:%M}"
+    item(L("sesja", "session"), d.session_id)
+    item(L("projekt", "project"),
+         d.project + (L(f"  (gałąź {d.branch})", f"  (branch {d.branch})") if d.branch else ""))
+    item(L("czas", "time"), f"{start:%Y-%m-%d %H:%M} → {until}  ({fmt_duration(d.duration)})"
+         + (f"   Claude Code {d.version}" if d.version else ""))
+    item(L("rozmowa", "conversation"),
+         L(f"prośby: {d.requests}, powiadomienia: {d.notifications}, kompaktowania: "
+           f"{d.compactions}, wywołania: {d.calls}, maks. kontekst {fmt_tok(d.max_context)}",
+           f"{d.requests} requests, {d.notifications} notifications, {d.compactions} "
+           f"compactions, {d.calls} calls, max context {fmt_tok(d.max_context)}"))
+    item(L("zużycie", "usage"), L(f"{fmt_tok(d.weighted)} ważonych, {fmt_tok(d.raw)} surowych",
+                                  f"{fmt_tok(d.weighted)} weighted, {fmt_tok(d.raw)} raw"))
+    item("cache", L(f"odbudowany od nowa {d.rebuilds.count}×"
+                    + (f" (nadmiar {fmt_tok(d.rebuilds.waste)}, najdłuższa przerwa "
+                       f"{d.rebuilds.longest_gap:.0f} min)" if d.rebuilds.count else ""),
+                    f"rewritten {d.rebuilds.count}×"
+                    + (f" (extra {fmt_tok(d.rebuilds.waste)}, longest pause "
+                       f"{d.rebuilds.longest_gap:.0f} min)" if d.rebuilds.count else "")))
+    item(L("długi kontekst", "long context"),
+         L(f"{d.long_calls} wywołań na kontekście ≥ {fmt_tok(LONG_CONTEXT)}, kompaktowań: "
+           f"{d.compactions}", f"{d.long_calls} calls at a context ≥ {fmt_tok(LONG_CONTEXT)}, "
+           f"compactions: {d.compactions}")
+         + (L(f" ({fmt_tok(d.long_weighted)} ważonych)", f" ({fmt_tok(d.long_weighted)} weighted)")
+            if d.long_calls else ""))
+    item("effort", ", ".join(
+        f"{effort_name(level)} {pct(u.weighted, d.weighted):.0f}% ({u.calls} {L('wyw.', 'calls')})"
+        for level, u in d.efforts))
+    item("ultracode", ultracode_text(d))
+    item(L("tryb fast", "fast mode"),
+         L(f"{d.fast.calls} wywołań ({pct(d.fast.weighted, d.weighted):.0f}% zużycia)",
+           f"{d.fast.calls} calls ({pct(d.fast.weighted, d.weighted):.0f}% of usage)")
+         if d.fast.calls else L("nie", "no"))
+    if d.skills:
+        item(L("skille", "skills"), ", ".join(f"{k} ×{n}" for k, n in d.skills.most_common()))
+
+
+def _session_models(out: _Lines, d: SessionDetail) -> None:
+    out.header(L("MODELE W TEJ SESJI", "MODELS IN THIS SESSION"))
+    total = d.weighted or 1e-9
+    out.add(f" {'model':<26}{L('wywoł.', 'calls'):>7}{L('subag.', 'sub'):>7}"
+            f"{L('wejście', 'input'):>8}{L('odczyt', 'c.read'):>9}{L('zapis', 'c.write'):>9}"
+            f"{L('wyjście', 'output'):>8}{L('ważone', 'weighted'):>9}{'%':>6}")
+    for m in d.models:
+        t = m.tokens
+        out.add(f" {m.model[:25]:<26}{m.calls:>7}{m.sub_calls:>7}{fmt_tok(t['input']):>8}"
+                f"{fmt_tok(t['cache_read']):>9}"
+                f"{fmt_tok(t['cache_write_5m'] + t['cache_write_1h']):>9}"
+                f"{fmt_tok(t['output']):>8}{fmt_tok(m.weighted):>9}{pct(m.weighted, total):>5.0f}%")
+    out.note(L("„subag.” = ile z tych wywołań zrobili subagenci; odczyt/zapis = cache.",
+               "'sub' = how many of these calls subagents made; c.read/c.write = cache."))
+    if d.agents:
+        out.header(L(f"SUBAGENCI W TEJ SESJI ({len(d.agents)})",
+                     f"SUBAGENTS IN THIS SESSION ({len(d.agents)})"))
+        out.add(f" {'id':<9}{L('typ', 'type'):<19}{'model':<15}{L('wywoł.', 'calls'):>6}"
+                f"{L('ważone', 'weighted'):>10}{'%':>6}  {L('zadanie', 'task')}")
+        for a in d.agents[:TOP_ROWS + 5]:
+            model = _short_model(a.models.most_common(1)[0][0])
+            if len(a.models) > 1:
+                model += f" +{len(a.models) - 1}"
+            out.add(f" {a.agent_id[:8]:<9}{a.agent_type[:18]:<19}{model[:14]:<15}{a.calls:>6}"
+                    f"{fmt_tok(a.weighted):>10}{pct(a.weighted, total):>5.0f}%  {a.task[:24]}")
+        if len(d.agents) > TOP_ROWS + 5:
+            out.add(" " + L(f"(pozostałe: {len(d.agents) - TOP_ROWS - 5})",
+                            f"(other: {len(d.agents) - TOP_ROWS - 5})"))
+
+
+def _session_files(out: _Lines, d: SessionDetail) -> None:
+    if d.files:
+        out.header(L(f"PLIKI — przeczytane i zmienione ({d.n_files})",
+                     f"FILES — read and changed ({d.n_files})"))
+        out.add(f" {L('plik', 'file'):<54}{L('odczyty', 'reads'):>8}{L('zmiany', 'edits'):>8}"
+                f"{L('ważone', 'weighted'):>10}{'%':>6}")
+        for f in d.files:
+            out.add(f" {short(f.name, 53):<54}{f.reads:>8}{f.edits:>8}{fmt_tok(f.weighted):>10}"
+                    f"{pct(f.weighted, d.weighted):>5.0f}%")
+        out.note(L("Odczyty narzędziem Read i przez cat/head/sed, zmiany przez Edit/Write. "
+                   "„ważone” = część wywołań, w których model sięgnął po ten plik.",
+                   "Reads with the Read tool and cat/head/sed, changes with Edit/Write. "
+                   "'weighted' = the share of the calls in which the model used this file."))
+    if d.searches:
+        out.add()
+        out.add(" " + L("najczęstsze wyszukiwania (Grep/Glob):",
+                        "most frequent searches (Grep/Glob):"))
+        for pattern, n in d.searches.most_common():
+            out.add(f"    {pattern[:70]:<72}{n:>4}×")
 
 
 def _session_phases(out: _Lines, ctx: ReportContext) -> None:
@@ -274,11 +385,53 @@ def _expired_cache(out: _Lines, stats: Stats) -> None:
                     f"({pct(rb.waste, total):.1f}% całości)",
                     f"such calls: {rb.count}   extra usage: {fmt_tok(rb.waste)} "
                     f"({pct(rb.waste, total):.1f}% of the total)"))
+    if rb.count:
+        out.add(" " + L("przerwa przed odbudową: ", "pause before the rewrite: ")
+                + ",  ".join(f"{label} min: {rb.by_gap[label]}" for _, label in GAP_BUCKETS))
+        out.note(L(
+            "Przerwa „< 5 min” to odbudowa bez wygaśnięcia z upływu czasu (np. zmiana modelu "
+            "albo zmiana wcześniejszej części rozmowy). Przerwę liczymy od poprzedniego "
+            "wywołania tego samego pliku rozmowy.",
+            "A pause of '< 5 min' is a rewrite that time did not cause (e.g. a model switch or "
+            "a change in an earlier part of the conversation). The pause is counted from the "
+            "previous call of the same conversation file."))
+        out.add(" " + L("sesje z największą liczbą odbudów:", "sessions with the most rewrites:"))
+        for key, sr in sorted(rb.by_session.items(), key=lambda kv: -kv[1].waste)[:TOP_REBUILDS]:
+            out.add(f"    {key[1][:8]}  "
+                    + L(f"{sr.count:>3}×  nadmiar {fmt_tok(sr.waste):>6}  najdłuższa przerwa "
+                        f"{sr.longest_gap:>5.0f} min",
+                        f"{sr.count:>3}×  extra {fmt_tok(sr.waste):>6}  longest pause "
+                        f"{sr.longest_gap:>5.0f} min"))
+        out.add(" " + L("największe pojedyncze zdarzenia:", "largest single events:"))
     for e in rb.top:
         out.add(f"    {e.time.astimezone():%Y-%m-%d %H:%M}  {e.file_key[1][:8]}  "
                 f"ctx {fmt_tok(e.context):>5}  "
                 + L(f"przerwa {e.gap_minutes:>4.0f} min  nadmiar {fmt_tok(e.waste)}",
                     f"gap {e.gap_minutes:>4.0f} min  extra {fmt_tok(e.waste)}"))
+    _long_context(out, stats)
+
+
+def _long_context(out: _Lines, stats: Stats) -> None:
+    lc = stats.long_context
+    out.header(L(f"DŁUGIE ROZMOWY — kontekst ≥ {fmt_tok(LONG_CONTEXT)}",
+                 f"LONG CONVERSATIONS — context ≥ {fmt_tok(LONG_CONTEXT)}"))
+    if not lc.calls:
+        out.add(" " + L("żadna rozmowa nie urosła do tego rozmiaru.",
+                        "no conversation grew to this size."))
+        return
+    out.add(" " + L(f"rozmów: {lc.sessions}, z tego nigdy nie kompaktowanych: "
+                    f"{lc.uncompacted_sessions}",
+                    f"conversations: {lc.sessions}, never compacted: {lc.uncompacted_sessions}"))
+    out.add(" " + L(f"wywołań na takim kontekście: {lc.calls}, ważone zużycie: "
+                    f"{fmt_tok(lc.weighted)} ({pct(lc.weighted, stats.weighted or 1e-9):.1f}% "
+                    f"całości)",
+                    f"calls at such a context: {lc.calls}, weighted usage: "
+                    f"{fmt_tok(lc.weighted)} ({pct(lc.weighted, stats.weighted or 1e-9):.1f}% "
+                    f"of the total)"))
+    out.note(L("To zużycie wywołań na dużym kontekście, nie oszczędność z /compact — jej nie da "
+               "się policzyć, bo nie wiadomo, jak mały byłby kontekst po kompaktowaniu.",
+               "This is what the calls at a large context used, not a saving from /compact — "
+               "that cannot be calculated, as the context after compaction is unknown."))
 
 
 def _rereads(out: _Lines, stats: Stats) -> None:
@@ -357,6 +510,72 @@ def _project_map(out: _Lines, stats: Stats) -> None:
                 out.add("     " + line)
 
 
+def _bash_noise(out: _Lines, stats: Stats) -> None:
+    w = stats.waste
+    if not w.bash_results:
+        return
+    out.header(L("SZUM Z POLECEŃ BASH — długie wyniki bez ograniczenia",
+                 "BASH NOISE — long results with no limit"))
+    total = stats.weighted or 1e-9
+    out.add(" " + L(f"wyników poleceń: {fmt_int(w.bash_results)}, ok. {fmt_tok(w.bash_tokens)} tokenów; "
+                    f"długich bez ograniczenia: ok. {fmt_tok(w.noisy_tokens)} tokenów, "
+                    f"po uwzględnieniu ponownych odczytów {fmt_tok(w.noisy_weighted)} ważonych "
+                    f"({pct(w.noisy_weighted, total):.1f}% zużycia)",
+                    f"command results: {fmt_int(w.bash_results)}, about {fmt_tok(w.bash_tokens)} "
+                    f"tokens; long and unlimited: about {fmt_tok(w.noisy_tokens)} tokens, "
+                    f"{fmt_tok(w.noisy_weighted)} weighted with the re-reads "
+                    f"({pct(w.noisy_weighted, total):.1f}% of usage)"))
+    out.note(bash_note())
+    if not w.families:
+        out.add(" " + L("Żaden rodzaj polecenia nie powtarza się z długim wynikiem.",
+                        "No kind of command repeats with a long result."))
+        return
+    out.add(f"   {L('polecenie', 'command'):<24}{L('długich', 'long'):>8}{L('z', 'of'):>6}"
+            f"{L('tokeny', 'tokens'):>9}{L('ważone', 'weighted'):>9}{L('max', 'max'):>8}")
+    for f in w.families:
+        out.add(f"   {short(f.name, 23):<24}{f.unlimited:>8}{f.runs:>6}{fmt_tok(f.tokens):>9}"
+                f"{fmt_tok(f.weighted):>9}{fmt_tok(f.biggest):>8}")
+        out.add(f"       → {advice(f.name)}")
+        if f.example and not stats.hotspots_hidden:
+            out.add(f"       {L('największe', 'largest')}: {short(f.example.replace(chr(10), ' '), 70)}")
+
+
+def _skills(out: _Lines, stats: Stats, namer: Namer, rows: int = TOP_ROWS) -> None:
+    sk = stats.waste.skills
+    if not (sk.conversations or sk.used):
+        return
+    out.header(L("SKILLE — które się przydają, a które tylko zajmują kontekst",
+                 "SKILLS — which ones earn their place and which only take up context"))
+    if sk.conversations:
+        out.add(" " + L(f"skilli na liście: {len(sk.available)} (ok. {fmt_tok(sk.listing_tokens())} "
+                        f"tokenów opisów w każdej rozmowie, rozmów z listą: {sk.conversations}); "
+                        f"nieużywanych: {len(sk.unused())} (ok. {fmt_tok(sk.unused_tokens())} "
+                        f"tokenów)",
+                        f"skills listed: {len(sk.available)} (about {fmt_tok(sk.listing_tokens())} "
+                        f"tokens of descriptions in every conversation, conversations with the "
+                        f"list: {sk.conversations}); unused: {len(sk.unused())} (about "
+                        f"{fmt_tok(sk.unused_tokens())} tokens)"))
+    out.note(skills_note())
+    used = sk.used_rows()
+    if used:
+        out.add(f"   {L('używane', 'used'):<40}{L('rozmowy', 'convs'):>8}")
+        for r in used[:rows]:
+            out.add(f"   {short(namer.skill(r.name), 39):<40}{r.uses:>8}")
+    unused = sk.unused()
+    if unused:
+        out.add()
+        out.add(f"   {L('nieużywane', 'unused'):<40}{L('tokeny', 'tokens'):>8}{L('wspomniany', 'named'):>12}")
+        for r in unused[:rows]:
+            out.add(f"   {short(namer.skill(r.name), 39):<40}{r.tokens:>8}{r.named_in:>12}")
+        if len(unused) > rows:
+            out.add("   " + L(f"… i {len(unused) - rows} kolejnych",
+                              f"… and {len(unused) - rows} more"))
+
+
+_FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache"),
+          ("bash", "--bash"), ("skills", "--skills"), ("map", "--project-map")]
+
+
 def text_report(stats: Stats, ctx: ReportContext) -> str:
     out = _Lines()
     out.rule()
@@ -365,20 +584,58 @@ def text_report(stats: Stats, ctx: ReportContext) -> str:
             + L("  (raport zużywa 0 tokenów)", "  (this report uses 0 tokens)"))
     out.rule()
     _summary(out, stats)
-    _token_types(out, stats)
-    _groups(out, stats, ctx)
-    _context_length(out, stats)
-    _over_time(out, stats)
+    if ctx.detail:
+        _session_info(out, ctx.detail)
+        _session_models(out, ctx.detail)
+        _session_files(out, ctx.detail)
+    if ctx.short:
+        if ctx.session:
+            _session_phases(out, ctx)
+        else:
+            if ctx.shows("activities"):
+                _activities(out, stats, 8)
+            if ctx.shows("models"):
+                _models(out, stats, 5)
+            if ctx.shows("sessions"):
+                _heaviest_sessions(out, stats, ctx, ctx.rows)
+        out.add()
+        out.add(" " + L("To skrócony raport. Domyślny: bez --short, wszystko: --full.",
+                        "This is the short report. The default one: without --short, "
+                        "everything: --full."))
+        out.rule()
+        return out.render()
+    if ctx.shows("activities"):
+        _activities(out, stats, ctx.rows + 3 if not ctx.full else TOP_ROWS + 6)
+    if not ctx.detail and ctx.shows("models"):  # a single session lists its models in SESSION DETAILS
+        _models(out, stats, ctx.rows)
     if ctx.session:
         _session_phases(out, ctx)
-    else:
-        _heaviest_sessions(out, stats, ctx)
-    _expired_cache(out, stats)
-    _rereads(out, stats)
-    _project_map(out, stats)
-    out.header(L("CO MOŻNA POPRAWIĆ", "WHAT YOU COULD IMPROVE"))
-    for tip in tips(stats):
-        out.bullet(tip)
+    elif ctx.shows("sessions"):
+        _heaviest_sessions(out, stats, ctx, ctx.rows)
+    if ctx.wants("time"):
+        _token_types(out, stats)
+        _over_time(out, stats)
+    if ctx.wants("breakdown"):
+        _breakdowns(out, stats, ctx)
+    if ctx.wants("cache"):
+        _context_length(out, stats)
+        _expired_cache(out, stats)
+        _rereads(out, stats)
+    if ctx.wants("bash"):
+        _bash_noise(out, stats)
+    if ctx.wants("skills"):
+        _skills(out, stats, ctx.namer, ctx.rows)
+    if ctx.wants("map"):
+        _project_map(out, stats)
+    if ctx.shows("tips"):
+        out.header(L("CO MOŻNA POPRAWIĆ", "WHAT YOU COULD IMPROVE"))
+        for tip in tips(stats, ctx):
+            out.bullet(tip)
+    out.add()
+    missing = [f for key, f in _FLAGS if not ctx.wants(key)]
+    if missing:
+        out.add(" " + L("Więcej szczegółów: ", "More detail: ") + " ".join(missing)
+                + L("  albo --full (wszystko)", "  or --full (everything)"))
     out.add()
     out.add(" " + L("Pełne wyjaśnienie tokenów surowych i ważonych: --explain",
                     "Full explanation of raw and weighted tokens: --explain"))
