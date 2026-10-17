@@ -304,6 +304,8 @@ conversations. It works with `--html` too.
 `--session <id>` (an id or its prefix from `--list`) adds **SESSION DETAILS** to the report:
 
 - project, git branch, Claude Code version, start, end and duration, requests and compactions
+- cache rewrites (how many times the conversation was written again, the extra usage and the
+  longest pause before one) and calls at a context of 150k tokens or more
 - every model with its calls (and how many of them subagents made), input, cache read, cache write,
   output and weighted tokens
 - the effort level of the calls (`low` ... `max`), whether **ultracode** was on (when it was switched
@@ -359,7 +361,7 @@ flags work for `--html`:
 | :--- | :--- |
 | `--time` | token types (raw vs weighted) and usage over time |
 | `--breakdown` | main session vs subagents, subagent types, projects |
-| `--cache` | conversation length, expired cache, repeated file reads |
+| `--cache` | conversation length, expired cache, long conversations, repeated file reads (below) |
 | `--bash` | Bash noise (below) |
 | `--skills` | skills (below) |
 | `--project-map` | the project map (above) |
@@ -417,6 +419,24 @@ Two sections look for avoidable cost:
 Tips at the end of the report summarise both. With `--private` skill names are replaced with
 `skill-N` and example commands are hidden.
 
+## Expired cache and long conversations
+
+Both live in the `--cache` section (and the **Cache and repeats** cards in the HTML report). They show
+only what the transcripts record, with no estimated savings:
+
+- **EXPIRED CACHE**: a call where most of the conversation (at least 50%, and at least 20k tokens of
+  context) was written again instead of read from the cache. The report counts them, sums the extra
+  weight over a normal cache read, and splits them by the pause before the call:
+  `< 5 min`, `5-60 min`, `> 60 min`. A short pause that still caused a rewrite was not caused by time
+  (for example a model switch or a change earlier in the conversation). Next come the sessions with
+  the most rewrites, and the largest single events.
+- **LONG CONVERSATIONS**: calls made at a context of 150k tokens or more, how many conversations
+  reached that size, and how many of them were never compacted with `/compact`. It is the weighted
+  usage of those calls. It is not what `/compact` would save: the context after compaction is unknown,
+  so that number cannot be calculated.
+
+In a session's details these appear as the `cache` and `long context` lines.
+
 ## Two measures
 
 This report is for Claude **subscriptions** (Pro/Max), so it shows no money, only tokens.
@@ -452,7 +472,9 @@ Official sources for the prices and the cache durations (5 minutes / 1 hour):
 | `stats.py` | aggregates calls into `Stats` (by activity, model, project, day, context size...) |
 | `hotspots.py` | the project map: repeated lookups per project vs. `CLAUDE.md` and rules |
 | `waste.py` | long unlimited shell results and unused / unnamed skills |
+| `session_detail.py` | the details of one session (`--session`) |
 | `daily.py`, `tips.py` | the `--daily` comparison and the suggestions |
+| `settings.py`, `configure.py` | saved report settings and the interactive `--configure` editor |
 | `periods.py` | `--days/--date/--from...` time windows |
 | `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |
 | `cli.py` | command line options, ties it all together |
