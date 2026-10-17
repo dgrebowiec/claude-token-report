@@ -20,24 +20,39 @@ MINIMAL_ELEMENTS = ("activities", "models", "sessions")
 
 def describe(element: str) -> str:
     return {
-        "activities": L("czynności: na co idą tokeny", "activities: what the tokens go to"),
-        "models": L("modele i ich waga", "models and their weight"),
-        "sessions": L("najcięższe rozmowy", "heaviest conversations"),
-        "tips": L("wskazówki: co można poprawić", "tips: what you could improve"),
-        "time": L("rodzaje tokenów i zużycie w czasie", "token types and usage over time"),
-        "breakdown": L("sesja główna vs subagenci, projekty", "main session vs subagents, projects"),
-        "cache": L("cache i długość rozmowy", "cache and conversation length"),
-        "bash": L("szum z poleceń Bash", "Bash noise"),
-        "skills": L("skille: używane i nieużywane", "skills: used and unused"),
-        "map": L("mapa projektu vs. CLAUDE.md", "project map vs. CLAUDE.md"),
+        "activities": L("czynności: na co idą tokeny (czytanie kodu, edycje, polecenia...)",
+                        "activities: what the tokens go to (reading code, edits, commands...)"),
+        "models": L("modele i ich waga: ile zużył każdy model",
+                    "models and their weight: what each model used"),
+        "sessions": L("najcięższe rozmowy: ranking sesji według zużycia",
+                      "heaviest conversations: sessions ranked by usage"),
+        "tips": L("wskazówki: co można poprawić, na podstawie tego raportu",
+                  "tips: what you could improve, from this report"),
+        "time": L("rodzaje tokenów (surowe vs ważone) i zużycie dzień po dniu",
+                  "token types (raw vs weighted) and usage day by day"),
+        "breakdown": L("sesja główna vs subagenci, typy subagentów, projekty",
+                       "main session vs subagents, subagent types, projects"),
+        "cache": L("długość rozmowy, wygasły cache, długie rozmowy, powtórne odczyty",
+                   "conversation length, expired cache, long conversations, re-reads"),
+        "bash": L("szum z poleceń Bash: długie wyniki, których nikt nie ograniczył",
+                  "Bash noise: long results nobody limited"),
+        "skills": L("skille: używane i nieużywane (nieużywane zajmują miejsce w każdej rozmowie)",
+                    "skills: used and unused (unused ones take room in every conversation)"),
+        "map": L("mapa projektu: pliki i symbole, których Claude szuka w kółko, vs. CLAUDE.md",
+                 "project map: files and symbols Claude keeps looking up, vs. CLAUDE.md"),
     }[element]
 
 
 def describe_level(level: str) -> str:
     return {
-        "minimal": L("skrócony raport, krótkie tabele", "short report, short tables"),
-        "normal": L("domyślny raport", "the default report"),
-        "detailed": L("długie tabele (10 wierszy zamiast 5)", "long tables (10 rows instead of 5)"),
+        "minimal": L("skrócony raport (short report): tylko czynności, modele i najcięższe "
+                     "rozmowy, krótkie tabele",
+                     "short report: only activities, models and heaviest conversations, "
+                     "short tables"),
+        "normal": L("domyślny raport: tabele po 5 wierszy, wybrane elementy",
+                    "the default report: tables of 5 rows, the chosen elements"),
+        "detailed": L("długie tabele: 10 wierszy zamiast 5, wybrane elementy w pełnej postaci",
+                      "long tables: 10 rows instead of 5, the chosen elements in full"),
     }[level]
 
 
