@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional
 
 from .naming import Namer
 from .session_detail import SessionDetail
 from .transcripts import Call, SessionKey, SessionMeta
+
+if TYPE_CHECKING:
+    from .options import ReportPlan
 
 TOP_ROWS = 10  # rows in the ranking tables (--full)
 CORE_ROWS = 5  # rows in the default report
@@ -29,6 +32,7 @@ class ReportContext:
     full: bool = False  # --full: every section, long tables
     only_chosen: bool = False  # saved settings: long tables (full) but only the chosen sections
     core: Optional[FrozenSet[str]] = None  # saved settings: core elements to show; None = all
+    plan: Optional["ReportPlan"] = None  # what the report shows (options.resolve)
 
     def wants(self, section: str) -> bool:
         return (self.full and not self.only_chosen) or section in self.sections

@@ -302,7 +302,11 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("MODELS", out)
         self.assertIn("CONVERSATION LENGTH", out)
         self.assertNotIn("CONVERSATION LENGTH", self.run_cli("--all", "--no-config"))
-        self.assertIn("WHAT YOU COULD IMPROVE", self.run_cli("--all", "--bash"))  # a flag overrides them
+        added = self.run_cli("--all", "--time")  # a section flag adds to the saved set
+        self.assertIn("MODELS", added)
+        self.assertIn("CONVERSATION LENGTH", added)
+        self.assertNotIn("WHAT YOU COULD IMPROVE", added)
+        self.assertIn("TOKEN TYPES", added)
 
     def test_saved_minimal_level_is_the_short_report(self):
         self.save_settings("minimal", ["activities", "tips", "cache"])

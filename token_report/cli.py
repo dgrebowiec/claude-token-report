@@ -15,6 +15,7 @@ from .explain import explain_text
 from .formatting import fmt_tok
 from .i18n import L
 from .naming import Namer
+from .options import OptionsError, ReportPlan, parse_only, resolve
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
@@ -144,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
                           "breakdown: main session vs subagents, subagent types, projects"))
     g.add_argument("--full", action="store_true",
                    help=L("wszystkie sekcje i dłuższe tabele", "every section and longer tables"))
+    g.add_argument("--only", type=parse_only, metavar=L("LISTA", "LIST"),
+                   help=L("tylko te elementy, po przecinku (zastępuje zapisane ustawienia): "
+                          + ",".join(settings_module.ELEMENTS),
+                          "only these elements, comma-separated (replaces the saved settings): "
+                          + ",".join(settings_module.ELEMENTS)))
     g = ap.add_argument_group(L("wyjście", "output"))
     g.add_argument("--html", metavar=L("PLIK", "FILE"), help=L("zapisz raport HTML", "write an HTML report"))
     g.add_argument("--md", metavar=L("PLIK", "FILE"),
@@ -212,10 +218,16 @@ def _daily_rows(window: Window, calls: List[Call], current: List[Call]) -> List[
     return daily_rows(daily_series(calls, series_from, last), has_base)
 
 
-def _saved_settings(args: argparse.Namespace) -> Optional[settings_module.Settings]:
-    """the settings saved by --configure, unless this run picks its own sections"""
-    own = args.short or args.full or any(getattr(args, k) for k in SECTIONS)
-    return None if own or args.no_config else settings_module.load()
+def _apply_plan(ctx: ReportContext, plan: ReportPlan,
+                saved: Optional[settings_module.Settings]) -> None:
+    """the plan in the older ReportContext fields the renderers still read"""
+    ctx.plan = plan
+    ctx.short = plan.base == "short" or (plan.base == "config" and saved is not None
+                                         and saved.level == "minimal")
+    ctx.full = plan.long_tables
+    ctx.only_chosen = True  # sections come from the plan, never from ctx.full
+    ctx.sections = frozenset(k for k in SECTIONS if plan.has(k))
+    ctx.core = frozenset(k for k in settings_module.CORE if plan.has(k))
 
 
 def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
@@ -234,6 +246,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     i18n.set_lang(i18n.detect_lang(argv))  # an invalid value is reported by argparse below
     ap = build_parser()
     args = ap.parse_args(argv)
+    saved = None if args.no_config else settings_module.load()
+    try:
+        plan = resolve(args, saved)  # before the separate commands: they take no report options
+    except OptionsError as e:
+        ap.error(str(e))
 
     color = _use_color(args.color)
     if args.explain:
@@ -290,18 +307,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         label += "  (" + namer.project(sessions.get(session_key), session_key[0]) + ")"
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
                         sessions=sessions, namer=namer,
-                        calls=current, session=args.session, session_key=session_key,
-                        short=args.short, full=args.full,
-                        sections=frozenset(k for k in SECTIONS if getattr(args, k)))
-    saved = _saved_settings(args)
-    if saved:
-        shown = saved.shown()
-        ctx.short, ctx.full = saved.level == "minimal", saved.level == "detailed"
-        ctx.only_chosen = True
-        ctx.sections = frozenset(k for k in SECTIONS if k in shown)
-        ctx.core = frozenset(k for k in settings_module.CORE if k in shown)
-    if args.md and not (saved or ctx.short or ctx.sections):
-        ctx.full = True  # an analysis wants all the data
+                        calls=current, session=args.session, session_key=session_key)
+    _apply_plan(ctx, plan, saved)
     if session_key:
         ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)

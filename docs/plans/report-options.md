@@ -4,7 +4,7 @@
 
 | # | Krok | Status |
 |---|------|--------|
-| 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | TODO |
+| 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | DONE |
 | 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | TODO |
 | 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | TODO |
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | TODO |
