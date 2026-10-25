@@ -5,7 +5,7 @@
 | # | Krok | Status |
 |---|------|--------|
 | 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | DONE |
-| 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | TODO |
+| 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | DONE |
 | 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | TODO |
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | TODO |
 | 5 | Stopka „Ustawienia tego raportu” | TODO |
@@ -345,7 +345,8 @@ jasnym błędem; raport i konfigurator mówią, co pokazano, czego nie i dlaczeg
 
 ## Zmiany planu
 
-<Puste na starcie.>
+- 2026-10-25 (krok 2) — tekst pomocy `--configure` przepisany na `compact` / `long` już w kroku 2 (stare nazwy
+  poziomów przestały istnieć); reszta pomocy i README zostaje w kroku 8.
 
 ## Otwarte pytania
 

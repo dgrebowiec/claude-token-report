@@ -13,7 +13,7 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | Okres | `--days`, `--date`, `--from/--to`, `--today`, `--yesterday`, `--all`, `--rolling` | `periods.resolve_window` |
 | Zakres | cała historia z okresu / `--session` | flaga |
 | Elementy | podsumowanie (zawsze) + rdzeń `activities, models, sessions, tips` + sekcje `time, breakdown, cache, bash, skills, map` | konfiguracja, preset, `--only`, flagi sekcji |
-| Długość tabel | krótkie (5 wierszy) / długie (10 wierszy) | konfiguracja (`detailed` = długie), preset `--full` |
+| Długość tabel | `compact` (5 wierszy) / `long` (10 wierszy) | konfiguracja (`level`), preset `--full`, `--long` |
 | Modyfikatory | `--diff`, `--daily` | flagi |
 
 ## `ReportPlan`
@@ -29,7 +29,8 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | `has(element)` | czy element jest w raporcie |
 
 `ReportContext.plan` przechowuje plan. Renderery czytają jeszcze stare pola `ReportContext`
-(`short`, `full`, `sections`, `core`, `only_chosen`), które `cli._apply_plan` wypełnia z planu.
+(`short`, `full`, `sections`, `core`, `only_chosen`), które `cli._apply_plan` wypełnia z planu:
+`short` = baza `short`, `full` = `long_tables`, sekcje i rdzeń = elementy planu.
 
 ## Presety (nazwane wartości osi)
 
@@ -39,17 +40,61 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | `--short` | `activities, models, sessions` | krótkie | `short` |
 | `--full` | wszystkie | długie | `full` |
 | `--md PLIK` bez presetu, `--only`, flag sekcji i konfiguracji | wszystkie | długie | `md` |
-| zapisana konfiguracja | `Settings.shown()` | długie przy poziomie `detailed` | `config` |
+| zapisana konfiguracja | `Settings.shown()` (wybrane elementy) | z `level` (`compact` / `long`) | `config` |
 
-Zapisany poziom `minimal` daje zestaw `Settings.shown()` (część wspólna z `activities, models, sessions`)
-i nadal renderuje się jako raport skrócony.
+`--long` w każdym wierszu tej tabeli zmienia tylko kolumnę „Tabele” na długie.
+
+## Długość tabel (`compact` / `long`) i `--long`
+
+Oś mówi wyłącznie, ile wierszy mają tabele rankingowe — nie dodaje, nie usuwa i nie zmienia sekcji.
+
+| Element | `compact` | `long` |
+|---|---|---|
+| `activities` | 8 wierszy (+ „pozostałe”) | 16 w terminalu/MD, 20 w HTML |
+| `models` | 5 | 10 |
+| `sessions` | 5 | 10 w terminalu/MD, 15 w HTML |
+| `skills` | 5 na listę (HTML: nieużywane 10) | 10 na listę (HTML: nieużywane 20) |
+
+Pozostałe elementy (`tips`, `time`, `breakdown`, `cache`, `bash`, `map`) mają tabele o stałej długości
+albo nie mają tabel — długość tabel ich nie zmienia. Źródło prawdy: `options.ELEMENT_INFO[element].has_tables`
+(ustalone z rendererów: liczba wierszy zależy od `ctx.rows` / długich tabel); z tej tabeli korzystają
+`settings.describe_level` i konfigurator (dopisek „long nic tu nie zmienia” przy włączonych elementach bez tabel,
+notka w podglądzie sekcji).
+
+- `--long` (grupa „zakres i widok”) — długie tabele bez zmiany zestawu elementów; działa z każdą bazą
+  (domyślny, konfiguracja, `--short`, `--only`). `--short --long` jest dozwolone (krótki zestaw, długie tabele).
+  Ograniczenie: raport `--short` ma jeszcze osobną ścieżkę renderowania ze sztywnymi długościami
+  (tekst: czynności 8, modele 5; HTML: czynności 10, modele do 12), więc `--short --long` wydłuża w nim tylko
+  najcięższe rozmowy — znika po scaleniu ścieżek (krok 3 planu).
+- `--full` = wszystkie elementy + `long` (`--full --long` nie jest błędem, `--long` jest wtedy zbędne).
+- Zapisany `level: "long"` daje długie tabele; `--long` przy zapisanym `compact` wydłuża je tylko w tym uruchomieniu.
+
+`ReportPlan.long_tables` niesie wynik. `ElementInfo.comparable` (czy `--diff` ma porównanie dla elementu)
+jest na razie `True` tylko dla `activities` i `models`.
+
+## Plik konfiguracji i migracja starych poziomów
+
+`~/.claude/claude-token-report.json` (albo `CLAUDE_TOKEN_REPORT_CONFIG`): `{"level": "compact" | "long",
+"elements": [...]}`; domyślnie `compact` i `activities, models, sessions, tips`. `Settings.shown()` zwraca
+wybrane elementy w kolejności `settings.ELEMENTS`.
+
+Stare poziomy wczytuje `settings.from_dict` (tabela `settings.OLD_LEVELS`):
+
+| Stary `level` | Nowy `level` | Elementy |
+|---|---|---|
+| `minimal` | `compact` | dotychczasowe ∩ `activities, models, sessions` (gdy puste — te trzy) |
+| `normal` | `compact` | bez zmian |
+| `detailed` | `long` | bez zmian |
+
+Nieznany poziom → `compact`. Plik nie jest przepisywany przy wczytaniu; zapis (`--configure`) jest zawsze
+w nowym formacie.
 
 ## `--only LISTA`
 
 Elementy po przecinku, nazwy jak w `settings.ELEMENTS`:
 `activities, models, sessions, tips, time, breakdown, cache, bash, skills, map`.
 Kolejność w raporcie jest zawsze kolejnością `ELEMENTS`, nie kolejnością na liście. Nieznana nazwa
-(albo pusta lista) → błąd `argparse` z listą dozwolonych. Tabele krótkie. Przykład:
+(albo pusta lista) → błąd `argparse` z listą dozwolonych. Tabele krótkie (długie z `--long`). Przykład:
 `python3 -m token_report --only models,cache`.
 
 ## Reguły pierwszeństwa (od najsilniejszej)
@@ -76,7 +121,7 @@ Kolejność w raporcie jest zawsze kolejnością `ELEMENTS`, nie kolejnością n
 
 Osobne polecenia: `--list`, `--explain`, `--configure`, `--reset-config`. Opcje raportu: okres
 (`--days`, `--date`, `--from`, `--to`, `--today`, `--yesterday`, `--all`, `--rolling`), flagi sekcji,
-`--short`, `--full`, `--only`, `--diff`, `--daily`, `--session`, `--html`, `--md`, `--private`, `--no-config`.
+`--short`, `--full`, `--long`, `--only`, `--diff`, `--daily`, `--session`, `--html`, `--md`, `--private`, `--no-config`.
 Opcje globalne dozwolone wszędzie: `--lang`, `--color` / `--no-color`, `--dir`.
 
 `--session --daily` jest dozwolone (dni jednej sesji).
@@ -84,4 +129,6 @@ Opcje globalne dozwolone wszędzie: `--lang`, `--color` / `--no-color`, `--dir`.
 ## Testy
 
 `tests/test_options.py` — presety, konfiguracja + flaga sekcji, `--only`, `--no-config`, `--md`,
-stare poziomy `minimal` / `detailed`, każdy twardy błąd i kod wyjścia 2 z `cli.main`.
+`--long` (z każdą bazą), `ELEMENT_INFO`, migracja każdego starego poziomu (`MigrationTest`), każdy twardy błąd
+i kod wyjścia 2 z `cli.main`. `tests/test_end_to_end.py` — `--long` nie zmienia sekcji, stary `minimal`
+z pliku, konfigurator (zapis `long`, podgląd `compact`/`long`, przywracanie domyślnych).

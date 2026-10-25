@@ -8,6 +8,7 @@ Precedence, strongest first:
 1. contradictory flags in one command -> error;
 2. a preset (--short / --full) or --only replaces the saved set of elements;
 3. section flags (--bash, --cache ...) add sections to the base set (saved, preset or default);
+   --long makes the tables long without changing the elements;
 4. --no-config -> the base set is the default one;
 5. a modifier (--diff, --daily) works on what the report has; it never turns hidden elements on.
 """
@@ -30,6 +31,28 @@ SECTION_FLAGS = {"time": "--time", "breakdown": "--breakdown", "cache": "--cache
 # separate commands: they print something else than a report
 COMMANDS = (("explain", "--explain"), ("configure", "--configure"),
             ("reset_config", "--reset-config"), ("list", "--list"))
+
+
+@dataclass(frozen=True)
+class ElementInfo:
+    has_tables: bool  # its table length depends on the long / compact setting
+    comparable: bool  # --diff has a comparison for it
+
+
+# read from the renderers (report_text, report_html): an element has tables when its number of
+# rows follows ctx.rows / long tables; breakdown, cache and bash tables have a fixed length
+ELEMENT_INFO: Dict[str, ElementInfo] = {
+    "activities": ElementInfo(has_tables=True, comparable=True),
+    "models": ElementInfo(has_tables=True, comparable=True),
+    "sessions": ElementInfo(has_tables=True, comparable=False),
+    "tips": ElementInfo(has_tables=False, comparable=False),
+    "time": ElementInfo(has_tables=False, comparable=False),
+    "breakdown": ElementInfo(has_tables=False, comparable=False),
+    "cache": ElementInfo(has_tables=False, comparable=False),
+    "bash": ElementInfo(has_tables=False, comparable=False),
+    "skills": ElementInfo(has_tables=True, comparable=False),
+    "map": ElementInfo(has_tables=False, comparable=False),
+}
 
 
 class OptionsError(ValueError):
@@ -67,7 +90,7 @@ def report_options(args: argparse.Namespace) -> List[str]:
     got = list(picked_options(args))
     got += [n for n, v in (("--to", args.to), ("--rolling", args.rolling)) if v]
     got += [flag for key, flag in SECTION_FLAGS.items() if getattr(args, key)]
-    got += [n for n, v in (("--short", args.short), ("--full", args.full),
+    got += [n for n, v in (("--short", args.short), ("--full", args.full), ("--long", args.long),
                            ("--only", args.only is not None), ("--diff", args.diff),
                            ("--daily", args.daily), ("--session", args.session is not None),
                            ("--html", args.html is not None), ("--md", args.md is not None),
@@ -123,14 +146,13 @@ def resolve(args: argparse.Namespace, saved: Optional[Settings]) -> ReportPlan:
     elif args.only is not None:
         base, chosen, how = "only", tuple(args.only), "flag"
     elif saved is not None:
-        # until compact/long (plan step 2): a saved "minimal" is the short report, "detailed"
-        # means long tables
         base, chosen, how = "config", tuple(saved.shown()), "config"
-        long_tables = saved.level == "detailed"
+        long_tables = saved.level == "long"
     elif args.md is not None and not flags:
         base, chosen, how, long_tables = "md", ELEMENTS, "preset", True  # an analysis wants all
     else:
         base, chosen, how = "default", DEFAULT, "default"
+    long_tables = long_tables or args.long  # --long: long tables, the same elements
     origin = {e: how for e in chosen}
     for k in flags:
         origin.setdefault(k, "flag")

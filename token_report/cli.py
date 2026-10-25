@@ -120,6 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("skrócony raport: główne liczby, czynności, modele i najcięższe rozmowy",
                           "short report: main numbers, activities, models and heaviest "
                           "conversations"))
+    g.add_argument("--long", action="store_true",
+                   help=L("długie tabele (10 wierszy zamiast 5) bez zmiany sekcji",
+                          "long tables (10 rows instead of 5) without changing the sections"))
     g.add_argument("--list", metavar="N", nargs="?", type=int, const=15,
                    help=L("pokaż ostatnie sesje", "list recent sessions"))
     g = ap.add_argument_group(L("sekcje (domyślnie: podsumowanie, czynności, modele, najcięższe "
@@ -160,12 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("ukryj nazwy projektów, plików i treść próśb (do udostępniania)",
                           "hide project/file names and prompt text (for sharing)"))
     g.add_argument("--configure", action="store_true",
-                   help=L("interaktywnie wybierz poziom szczegółowości (minimal / normal / "
-                          "detailed) i elementy raportu; zapisane ustawienia działają, gdy nie "
-                          "podasz flag sekcji",
-                          "interactively pick the detail level (minimal / normal / detailed) and "
-                          "the report elements; the saved choice applies when you pass no "
-                          "section flags"))
+                   help=L("interaktywnie wybierz elementy raportu i długość tabel (compact / "
+                          "long); flagi sekcji dopisują się do zapisanego zestawu",
+                          "interactively pick the report elements and the table length (compact / "
+                          "long); section flags add to the saved set"))
     g.add_argument("--reset-config", action="store_true",
                    help=L("przywróć domyślne ustawienia raportu (usuwa plik konfiguracji)",
                           "reset report configuration to defaults (removes configuration file)"))
@@ -218,12 +219,10 @@ def _daily_rows(window: Window, calls: List[Call], current: List[Call]) -> List[
     return daily_rows(daily_series(calls, series_from, last), has_base)
 
 
-def _apply_plan(ctx: ReportContext, plan: ReportPlan,
-                saved: Optional[settings_module.Settings]) -> None:
+def _apply_plan(ctx: ReportContext, plan: ReportPlan) -> None:
     """the plan in the older ReportContext fields the renderers still read"""
     ctx.plan = plan
-    ctx.short = plan.base == "short" or (plan.base == "config" and saved is not None
-                                         and saved.level == "minimal")
+    ctx.short = plan.base == "short"
     ctx.full = plan.long_tables
     ctx.only_chosen = True  # sections come from the plan, never from ctx.full
     ctx.sections = frozenset(k for k in SECTIONS if plan.has(k))
@@ -308,7 +307,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
                         sessions=sessions, namer=namer,
                         calls=current, session=args.session, session_key=session_key)
-    _apply_plan(ctx, plan, saved)
+    _apply_plan(ctx, plan)
     if session_key:
         ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)

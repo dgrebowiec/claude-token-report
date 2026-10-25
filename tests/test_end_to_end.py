@@ -308,30 +308,45 @@ class EndToEndTest(unittest.TestCase):
         self.assertNotIn("WHAT YOU COULD IMPROVE", added)
         self.assertIn("TOKEN TYPES", added)
 
-    def test_saved_minimal_level_is_the_short_report(self):
+    def test_saved_minimal_level_migrates_to_its_elements(self):
         self.save_settings("minimal", ["activities", "tips", "cache"])
         out = self.run_cli("--all")
-        self.assertIn("short report", out)
+        self.assertIn("WHERE THE TOKENS GO", out)
         self.assertNotIn("WHAT YOU COULD IMPROVE", out)
         self.assertNotIn("CONVERSATION LENGTH", out)
+        self.assertNotIn("MODELS", out)
+
+    def test_long_flag_lengthens_tables_only(self):
+        def headers(*argv):
+            return [line for line in self.run_cli("--all", *argv).splitlines()
+                    if line.startswith("── ")]
+        # the fixture is too small for the longer tables to show; the sections must not change
+        self.assertEqual(headers("--long"), headers())
+        self.save_settings("compact", ["models", "cache"])
+        self.assertEqual(headers("--long"), headers())
+        self.assertNotIn("── WHERE THE TOKENS GO", "\n".join(headers("--long")))
 
     def test_configure_saves_through_the_line_editor(self):
         from token_report import configure
-        answers = iter(["l", "l", "5", "w"])  # normal -> detailed -> minimal, then toggle "time"
+        answers = iter(["l", "5", "w"])  # compact -> long, then toggle "time"
         saved = configure.run(__import__("pathlib").Path(self.config), ask=lambda _p: next(answers),
                               out=lambda _t: None)
         self.assertEqual(str(saved), self.config)
         with open(self.config, encoding="utf-8") as f:
             data = json.load(f)
-        self.assertEqual(data["level"], "minimal")
+        self.assertEqual(data["level"], "long")
         self.assertEqual(data["elements"], ["activities", "models", "sessions", "tips", "time"])
 
     def test_configure_section_preview_and_reset(self):
         from token_report import configure
-        preview_act = configure.section_preview("activities", "normal", color=False)
+        preview_act = configure.section_preview("activities", "compact", color=False)
         self.assertTrue(any("NA CO IDĄ TOKENY" in line or "WHERE THE TOKENS GO" in line for line in preview_act))
-        preview_omitted = configure.section_preview("bash", "minimal", color=False)
-        self.assertTrue(any("pomijana" in line or "omitted" in line for line in preview_omitted))
+        self.assertGreater(len(configure.section_preview("activities", "long", color=False)),
+                           len(preview_act))
+        fixed = configure.section_preview("bash", "long", color=False)
+        self.assertTrue(any("do not change" in line for line in fixed))
+        self.assertFalse(any("do not change" in line
+                             for line in configure.section_preview("bash", "compact", color=False)))
 
         # Test restoring defaults with 'd'
         self.save_settings("detailed", ["bash", "skills"])
@@ -340,7 +355,7 @@ class EndToEndTest(unittest.TestCase):
                               out=lambda _t: None)
         with open(self.config, encoding="utf-8") as f:
             data = json.load(f)
-        self.assertEqual(data["level"], "normal")
+        self.assertEqual(data["level"], "compact")
         self.assertEqual(data["elements"], ["activities", "models", "sessions", "tips"])
 
     def test_cli_reset_config(self):

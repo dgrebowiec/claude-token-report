@@ -1,4 +1,4 @@
-"""Saved report settings: detail level and which elements the report contains."""
+"""Saved report settings: table length (compact / long) and which elements the report contains."""
 from __future__ import annotations
 
 import json
@@ -12,10 +12,11 @@ from .i18n import L
 
 CORE = ("activities", "models", "sessions", "tips")  # shown in the default report
 ELEMENTS = CORE + SECTIONS
-LEVELS = ("minimal", "normal", "detailed")
+LEVELS = ("compact", "long")  # table length: 5 or 10 rows in the ranking tables
 DEFAULT_ELEMENTS = list(CORE)
-# elements the minimal level (the short report) has no room for
-MINIMAL_ELEMENTS = ("activities", "models", "sessions")
+# the levels of older versions -> (level, elements to keep or None for all of them)
+OLD_LEVELS = {"minimal": ("compact", ("activities", "models", "sessions")),
+              "normal": ("compact", None), "detailed": ("long", None)}
 
 
 def describe(element: str) -> str:
@@ -44,21 +45,20 @@ def describe(element: str) -> str:
 
 
 def describe_level(level: str) -> str:
-    return {
-        "minimal": L("skrócony raport (short report): tylko czynności, modele i najcięższe "
-                     "rozmowy, krótkie tabele",
-                     "short report: only activities, models and heaviest conversations, "
-                     "short tables"),
-        "normal": L("domyślny raport: tabele po 5 wierszy, wybrane elementy",
-                    "the default report: tables of 5 rows, the chosen elements"),
-        "detailed": L("długie tabele: 10 wierszy zamiast 5, wybrane elementy w pełnej postaci",
-                      "long tables: 10 rows instead of 5, the chosen elements in full"),
-    }[level]
+    if level == "compact":
+        return L("krótkie tabele: rankingi po 5 wierszy (czynności po 8)",
+                 "short tables: rankings of 5 rows (activities 8)")
+    from .options import ELEMENT_INFO  # options imports this module
+    fixed = ", ".join(e for e in ELEMENTS if not ELEMENT_INFO[e].has_tables)
+    return L("długie tabele: rankingi po 10 wierszy (czynności po 16); nie zmienia sekcji bez "
+             "tabel: " + fixed,
+             "long tables: rankings of 10 rows (activities 16); does not change the sections "
+             "without tables: " + fixed)
 
 
 @dataclass
 class Settings:
-    level: str = "normal"
+    level: str = "compact"
     elements: List[str] = field(default_factory=lambda: list(DEFAULT_ELEMENTS))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -66,8 +66,7 @@ class Settings:
 
     def shown(self) -> List[str]:
         """Elements that end up in the report, in report order."""
-        allowed = MINIMAL_ELEMENTS if self.level == "minimal" else ELEMENTS
-        return [e for e in ELEMENTS if e in self.elements and e in allowed]
+        return [e for e in ELEMENTS if e in self.elements]
 
 
 def settings_path() -> Path:
@@ -78,15 +77,17 @@ def settings_path() -> Path:
 
 
 def from_dict(data: Any) -> Settings:
-    """Tolerant parsing: anything wrong falls back to the default for that key."""
+    """Tolerant parsing: anything wrong falls back to the default for that key. The levels of
+    older versions (minimal / normal / detailed) are migrated to compact / long."""
     if not isinstance(data, dict):
         return Settings()
     level = data.get("level")
-    elements: List[str] = []
-    for name in data.get("elements") or []:
-        if name in ELEMENTS and name not in elements:
-            elements.append(name)
-    return Settings(level=level if level in LEVELS else "normal",
+    elements = [e for e in ELEMENTS if e in (data.get("elements") or [])]
+    if level in OLD_LEVELS:
+        level, keep = OLD_LEVELS[level]
+        if keep is not None:  # minimal was the short report: only these three fitted in
+            elements = [e for e in elements if e in keep] or list(keep)
+    return Settings(level=level if level in LEVELS else "compact",
                     elements=elements or list(DEFAULT_ELEMENTS))
 
 

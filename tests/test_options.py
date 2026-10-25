@@ -8,8 +8,8 @@ from unittest import mock
 
 from token_report import i18n
 from token_report.cli import build_parser, main
-from token_report.options import OptionsError, resolve
-from token_report.settings import CORE, ELEMENTS, Settings
+from token_report.options import ELEMENT_INFO, OptionsError, resolve
+from token_report.settings import CORE, ELEMENTS, Settings, describe_level, from_dict
 
 
 def args(*argv):
@@ -52,24 +52,72 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(p.base, "short")
 
     def test_section_flag_adds_to_the_saved_settings(self):
-        saved = Settings(level="normal", elements=["activities", "cache"])
+        saved = Settings(level="compact", elements=["activities", "cache"])
         p = plan("--bash", saved=saved)
         self.assertEqual(p.elements, ("activities", "cache", "bash"))
         self.assertEqual(p.base, "config")
         self.assertEqual(p.origin, {"activities": "config", "cache": "config", "bash": "flag"})
 
-    def test_saved_detailed_means_long_tables(self):
-        p = plan(saved=Settings(level="detailed", elements=["models", "bash"]))
+    def test_saved_long_means_long_tables(self):
+        p = plan(saved=Settings(level="long", elements=["models", "bash"]))
         self.assertEqual(p.elements, ("models", "bash"))
         self.assertTrue(p.long_tables)
 
-    def test_saved_minimal_is_the_short_set(self):
-        p = plan(saved=Settings(level="minimal", elements=["activities", "tips", "cache"]))
-        self.assertEqual(p.elements, ("activities",))
-        self.assertFalse(p.long_tables)
+    def test_saved_compact_means_short_tables(self):
+        p = plan(saved=Settings(level="compact", elements=["models", "bash"]))
+        self.assertEqual((p.elements, p.long_tables), (("models", "bash"), False))
+
+    def test_long_flag_makes_tables_long_and_keeps_the_elements(self):
+        self.assertEqual((plan("--long").elements, plan("--long").long_tables), (CORE, True))
+        self.assertEqual(plan("--long").base, "default")
+        short = plan("--short", "--long")  # allowed: the short set with long tables
+        self.assertEqual((short.base, short.elements, short.long_tables),
+                         ("short", ("activities", "models", "sessions"), True))
+        saved = Settings(level="compact", elements=["models", "cache"])
+        p = plan("--long", saved=saved)
+        self.assertEqual((p.base, p.elements, p.long_tables), ("config", ("models", "cache"), True))
+        self.assertTrue(plan("--only", "models", "--long").long_tables)
+        self.assertTrue(plan("--full", "--long").long_tables)
+
+    def test_element_info_covers_every_element(self):
+        self.assertEqual(set(ELEMENT_INFO), set(ELEMENTS))
+        self.assertEqual([e for e in ELEMENTS if ELEMENT_INFO[e].has_tables],
+                         ["activities", "models", "sessions", "skills"])
+        self.assertIn("bash", describe_level("long"))
+        self.assertNotIn("models", describe_level("long"))
+        self.assertIn("5", describe_level("compact"))
+
+
+class MigrationTest(unittest.TestCase):
+    """the levels minimal / normal / detailed of older versions"""
+
+    def test_minimal_keeps_the_short_elements(self):
+        s = from_dict({"level": "minimal", "elements": ["activities", "tips", "cache"]})
+        self.assertEqual((s.level, s.elements), ("compact", ["activities"]))
+        self.assertEqual(plan(saved=s).elements, ("activities",))
+
+    def test_minimal_without_short_elements_gets_all_three(self):
+        s = from_dict({"level": "minimal", "elements": ["bash", "cache"]})
+        self.assertEqual((s.level, s.elements), ("compact", ["activities", "models", "sessions"]))
+
+    def test_normal_is_compact(self):
+        s = from_dict({"level": "normal", "elements": ["models", "cache"]})
+        self.assertEqual((s.level, s.elements), ("compact", ["models", "cache"]))
+
+    def test_detailed_is_long_with_the_same_elements(self):
+        s = from_dict({"level": "detailed", "elements": ["bash", "models"]})
+        self.assertEqual((s.level, s.elements), ("long", ["models", "bash"]))
+        p = plan(saved=s)
+        self.assertEqual((p.elements, p.long_tables), (("models", "bash"), True))
+
+    def test_new_levels_and_junk(self):
+        self.assertEqual(from_dict({"level": "long"}).level, "long")
+        self.assertEqual(from_dict({"level": "huge"}).level, "compact")
+        self.assertEqual(Settings().level, "compact")
+        self.assertEqual(from_dict({"level": "detailed"}).to_dict()["level"], "long")
 
     def test_preset_and_only_replace_the_saved_settings(self):
-        saved = Settings(level="detailed", elements=["bash"])
+        saved = Settings(level="long", elements=["bash"])
         self.assertEqual(plan("--short", saved=saved).elements, ("activities", "models", "sessions"))
         p = plan("--only", "cache,models", saved=saved)
         self.assertEqual((p.base, p.elements, p.long_tables), ("only", ("models", "cache"), False))
@@ -86,7 +134,7 @@ class ResolveTest(unittest.TestCase):
         self.assertIn("activities", err.getvalue())
 
     def test_no_config_ignores_the_saved_settings(self):
-        saved = Settings(level="detailed", elements=["bash"])
+        saved = Settings(level="long", elements=["bash"])
         p = plan("--no-config", "--cache", saved=saved)
         self.assertEqual((p.base, p.elements, p.long_tables), ("default", CORE + ("cache",), False))
 
@@ -124,7 +172,8 @@ class ResolveTest(unittest.TestCase):
             for opt, shown in ((["--bash"], "--bash"), (["--project-map"], "--project-map"),
                                (["--days", "0.5"], "--days"), (["--to", "09-01"], "--to"),
                                (["--rolling"], "--rolling"), (["--short"], "--short"),
-                               (["--full"], "--full"), (["--only", "models"], "--only"),
+                               (["--full"], "--full"), (["--long"], "--long"),
+                               (["--only", "models"], "--only"),
                                (["--diff"], "--diff"), (["--daily"], "--daily"),
                                (["--session"], "--session"), (["--html", "x"], "--html"),
                                (["--md", "x"], "--md"), (["--private"], "--private"),
