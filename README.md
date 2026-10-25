@@ -61,7 +61,7 @@ Real usage from one week, with project names, file names and prompts hidden (`--
  (other: 7)                           9.5M      666k   0.8%
 ```
 
-The bar after `│` shows the row's share of the total (in the period table: of the busiest period). With color it is yellow from 40%, cyan from 10% and dim below that.
+The bar after `│` shows the row's share of the total (in the period table: of the busiest period). With color the filled part is cyan and the rest is dim.
 
 <details>
 <summary>The whole terminal report</summary>

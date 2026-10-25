@@ -65,8 +65,7 @@ class _Style:
             return "│" + raw
         dots = raw.find("▯")
         fill = raw if dots == -1 else raw[:dots]
-        tone = self.yellow if frac >= 0.4 else self.cyan if frac >= 0.1 else self.dim
-        return self.dim("│") + tone(fill) + (self.dim(raw[dots:]) if dots != -1 else "")
+        return self.dim("│") + self.cyan(fill) + (self.dim(raw[dots:]) if dots != -1 else "")
 
     def delta(self, text: str, diff: float) -> str:
         if not self.enabled or abs(diff) < 1e-9:
