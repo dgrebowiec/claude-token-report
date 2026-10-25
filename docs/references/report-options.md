@@ -28,11 +28,36 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | `notes` | miękkie uwagi do stopki raportu (obecnie zawsze puste) |
 | `has(element)` | czy element jest w raporcie |
 
-`ReportContext.plan` przechowuje plan. Renderery czytają jeszcze stare pola `ReportContext`
-(`short`, `full`, `sections`, `core`, `only_chosen`), które `cli._apply_plan` wypełnia z planu:
-`short` = baza `short`, `full` = `long_tables`, sekcje i rdzeń = elementy planu.
+`ReportContext.plan` przechowuje plan (`cli.main` podaje go przy tworzeniu kontekstu; bez podania —
+plan raportu domyślnego: rdzeń, krótkie tabele). Renderery pytają tylko o plan:
+`ctx.has(element)` = `plan.has(element)`, `ctx.rows` = 10 przy `long_tables`, inaczej 5.
+`ReportContext` nie ma już pól `short`, `full`, `only_chosen`, `sections`, `core`.
+
+## Jedna ścieżka renderowania
+
+`report_text.text_report` i `report_html.html_report` mają jedną ścieżkę: podsumowanie (zawsze), bloki
+pojedynczej sesji, potem każdy element planu w stałej kolejności, na końcu podpowiedź „Więcej szczegółów:
+<flagi sekcji, których nie ma w planie>” (`_FLAGS`; w HTML `_more`). Nie ma osobnego trybu „raport skrócony”
+ani jego stopki — `--short` to tylko zestaw elementów, więc:
+
+- `--short --bash` (i każda flaga sekcji) dopisuje sekcję do krótkiego zestawu;
+- `--short --long` wydłuża wszystkie tabele krótkiego zestawu (czynności, modele, rozmowy);
+- w HTML porównanie (`--diff`, `_comparison`) i „dzień po dniu” (`--daily`, `_daily`) są składane zawsze, gdy
+  są dane — niezależnie od presetu; w terminalu i MD drukowane jak dotąd przed raportem;
+- raport `--short` ma te same liczby wierszy co domyślny (np. czynności 8, modele 5), także w HTML.
+
+Pojedyncza sesja (`--session`): po podsumowaniu bloki `_session_info` / `_session_models` / `_session_files`
+(tekst) albo „Szczegóły sesji” (HTML), potem czynności (jeśli w planie), a zamiast rankingu rozmów —
+fazy sesji (`_session_phases`, tekst); tabela modeli nie jest powtarzana (modele są w szczegółach sesji).
+Tak samo z `--short` i bez niego.
+
+`tips.tips(stats, ctx)` używa `ctx.has(sekcja)`: podpowiedź o sekcji spoza planu kończy się flagą
+(„Szczegóły: --cache”); `ctx=None` — bez dopisków o flagach.
 
 ## Presety (nazwane wartości osi)
+
+Preset to tylko zestaw elementów i długość tabel — nie tryb renderowania. Raport z presetem składa się
+tak samo jak każdy inny.
 
 | Preset | Elementy | Tabele | `base` |
 |---|---|---|---|
@@ -62,10 +87,8 @@ albo nie mają tabel — długość tabel ich nie zmienia. Źródło prawdy: `op
 notka w podglądzie sekcji).
 
 - `--long` (grupa „zakres i widok”) — długie tabele bez zmiany zestawu elementów; działa z każdą bazą
-  (domyślny, konfiguracja, `--short`, `--only`). `--short --long` jest dozwolone (krótki zestaw, długie tabele).
-  Ograniczenie: raport `--short` ma jeszcze osobną ścieżkę renderowania ze sztywnymi długościami
-  (tekst: czynności 8, modele 5; HTML: czynności 10, modele do 12), więc `--short --long` wydłuża w nim tylko
-  najcięższe rozmowy — znika po scaleniu ścieżek (krok 3 planu).
+  (domyślny, konfiguracja, `--short`, `--only`). `--short --long` jest dozwolone (krótki zestaw, długie tabele —
+  wydłużają się wszystkie jego tabele).
 - `--full` = wszystkie elementy + `long` (`--full --long` nie jest błędem, `--long` jest wtedy zbędne).
 - Zapisany `level: "long"` daje długie tabele; `--long` przy zapisanym `compact` wydłuża je tylko w tym uruchomieniu.
 
@@ -132,3 +155,7 @@ Opcje globalne dozwolone wszędzie: `--lang`, `--color` / `--no-color`, `--dir`.
 `--long` (z każdą bazą), `ELEMENT_INFO`, migracja każdego starego poziomu (`MigrationTest`), każdy twardy błąd
 i kod wyjścia 2 z `cli.main`. `tests/test_end_to_end.py` — `--long` nie zmienia sekcji, stary `minimal`
 z pliku, konfigurator (zapis `long`, podgląd `compact`/`long`, przywracanie domyślnych).
+`--short` jako zestaw elementów: `test_short`, `test_short_is_a_set_of_elements` (flagi sekcji dopisują się,
+`--short --long` — te same sekcje), `test_html_short_keeps_comparison_and_daily` (`--short --diff --html` ma
+porównanie, `--short --daily --html` — „dzień po dniu”), `--session --short` ma fazy sesji;
+`tests/test_waste.py` — plan `--short --bash` renderuje sekcję bash w tekście i HTML.

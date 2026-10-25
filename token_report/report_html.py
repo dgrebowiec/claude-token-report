@@ -7,7 +7,7 @@ import os
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .classify import activity_name
-from .context import TOP_ROWS, ReportContext
+from .context import ReportContext
 from .daily import DayRow, daily_summary
 from .explain import explain_text
 from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative, pct,
@@ -351,7 +351,7 @@ def _heaviest_sessions(stats: Stats, ctx: ReportContext) -> str:
     if ctx.session:
         return ""
     total = stats.weighted or 1e-9
-    top = sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.rows + (5 if ctx.full else 0)]
+    top = sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.rows + (5 if ctx.plan.long_tables else 0)]
     details = details_for(ctx.calls, ctx.sessions, [k for k, _ in top], ctx.namer)
     rows = ""
     for key, s in top:
@@ -655,7 +655,7 @@ _FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache")
 
 
 def _more(ctx: ReportContext) -> str:
-    missing = [f for key, f in _FLAGS if not ctx.wants(key)]
+    missing = [f for key, f in _FLAGS if not ctx.has(key)]
     if not missing:
         return ""
     flags = " ".join(f"<code>{f}</code>" for f in missing)
@@ -690,21 +690,13 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
     ])
     tooltip = (f"<div id=tip role=tooltip hidden></div>\n<script>\n{_asset('tooltip.js')}"
                f"{_asset('sessions.js')}</script>")
-    if ctx.short:
-        body = [_summary_cards(stats), _single_session(ctx)]
-        if not ctx.session:
-            body += [_activities(stats, TOP_ROWS) if ctx.shows("activities") else "",
-                     _models(stats) if ctx.shows("models") else "",
-                     _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else ""]
-        body.append(f"<p class=sub>{L('To skrócony raport. Domyślny: bez --short, wszystko: --full.', 'This is the short report. The default one: without --short, everything: --full.')}</p>")
-        return "\n".join([head, *body, _footer(), "</main>", tooltip, "</body></html>"])
     optional = [
-        _token_types(stats) + _time_chart(stats) if ctx.wants("time") else "",
-        _breakdowns(stats, ctx) if ctx.wants("breakdown") else "",
-        _context_length(stats) + _cache_and_repeats(stats) if ctx.wants("cache") else "",
-        _bash_noise(stats) if ctx.wants("bash") else "",
-        _skills(stats, ctx) if ctx.wants("skills") else "",
-        _project_map(stats) if ctx.wants("map") else "",
+        _token_types(stats) + _time_chart(stats) if ctx.has("time") else "",
+        _breakdowns(stats, ctx) if ctx.has("breakdown") else "",
+        _context_length(stats) + _cache_and_repeats(stats) if ctx.has("cache") else "",
+        _bash_noise(stats) if ctx.has("bash") else "",
+        _skills(stats, ctx) if ctx.has("skills") else "",
+        _project_map(stats) if ctx.has("map") else "",
     ]
     return "\n".join([
         head,
@@ -713,11 +705,11 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         _explanation(),
         _comparison(stats, prev, ctx),
         _daily(daily),
-        _activities(stats, 20 if ctx.full else 8) if ctx.shows("activities") else "",
-        _models(stats, ctx.rows) if ctx.shows("models") and not ctx.detail else "",
-        _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else "",
+        _activities(stats, 20 if ctx.plan.long_tables else 8) if ctx.has("activities") else "",
+        _models(stats, ctx.rows) if ctx.has("models") and not ctx.detail else "",
+        _heaviest_sessions(stats, ctx) if ctx.has("sessions") else "",
         *optional,
-        _tips(stats, ctx) if ctx.shows("tips") else "",
+        _tips(stats, ctx) if ctx.has("tips") else "",
         _more(ctx),
         _footer(),
         "</main>",

@@ -121,6 +121,8 @@ class RenderTest(unittest.TestCase):
     def test_reports_mention_both_sections(self):
         from token_report.context import ReportContext
         from token_report.naming import Namer
+        from token_report.options import ReportPlan
+        from token_report.settings import ELEMENTS
         from token_report.report_html import html_report
         from token_report.report_text import text_report
         from token_report.stats import aggregate
@@ -132,7 +134,8 @@ class RenderTest(unittest.TestCase):
                                                                   "e-skill": 400})}
         calls = [_call(i, [("Bash", {"command": "git diff"})], [BIG]) for i in range(3)]
         stats = aggregate(calls, sessions, namer)
-        ctx = ReportContext("period", "~/.claude/projects", sessions, namer, calls, full=True)
+        full = ReportPlan(elements=ELEMENTS, long_tables=True)
+        ctx = ReportContext("period", "~/.claude/projects", sessions, namer, calls, plan=full)
         text = text_report(stats, ctx)
         self.assertIn("BASH NOISE", text)
         self.assertIn("git diff --stat", text)
@@ -143,9 +146,15 @@ class RenderTest(unittest.TestCase):
         self.assertIn("a-skill", page)
         private = text_report(aggregate(calls, sessions, Namer(private=True)),
                               ReportContext("p", "~", sessions, Namer(private=True), calls,
-                                           full=True))
+                                           plan=full))
         self.assertNotIn("a-skill", private)
         self.assertIn("skill-1", private)
+        # --short --bash: the short set plus the bash section, in both renderers
+        short_bash = ReportContext("p", "~", sessions, namer, calls,
+                                   plan=ReportPlan(elements=("activities", "models", "sessions", "bash")))
+        self.assertIn("BASH NOISE", text_report(stats, short_bash))
+        self.assertNotIn("SKILLS", text_report(stats, short_bash))
+        self.assertIn("Bash noise", html_report(stats, short_bash))
 
 
 if __name__ == "__main__":

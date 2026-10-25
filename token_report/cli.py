@@ -9,13 +9,13 @@ import urllib.parse
 from typing import List, Optional, Sequence
 
 from . import __version__, configure, i18n, settings as settings_module
-from .context import SECTIONS, ReportContext
+from .context import ReportContext
 from .daily import DayRow, daily_rows, daily_series
 from .explain import explain_text
 from .formatting import fmt_tok
 from .i18n import L
 from .naming import Namer
-from .options import OptionsError, ReportPlan, parse_only, resolve
+from .options import OptionsError, parse_only, resolve
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
@@ -219,16 +219,6 @@ def _daily_rows(window: Window, calls: List[Call], current: List[Call]) -> List[
     return daily_rows(daily_series(calls, series_from, last), has_base)
 
 
-def _apply_plan(ctx: ReportContext, plan: ReportPlan) -> None:
-    """the plan in the older ReportContext fields the renderers still read"""
-    ctx.plan = plan
-    ctx.short = plan.base == "short"
-    ctx.full = plan.long_tables
-    ctx.only_chosen = True  # sections come from the plan, never from ctx.full
-    ctx.sections = frozenset(k for k in SECTIONS if plan.has(k))
-    ctx.core = frozenset(k for k in settings_module.CORE if plan.has(k))
-
-
 def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
@@ -306,8 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         label += "  (" + namer.project(sessions.get(session_key), session_key[0]) + ")"
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
                         sessions=sessions, namer=namer,
-                        calls=current, session=args.session, session_key=session_key)
-    _apply_plan(ctx, plan)
+                        calls=current, session=args.session, session_key=session_key, plan=plan)
     if session_key:
         ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)

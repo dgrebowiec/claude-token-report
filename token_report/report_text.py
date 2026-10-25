@@ -836,51 +836,35 @@ def text_report(stats: Stats, ctx: ReportContext, color: bool = False) -> str:
         _session_info(out, ctx.detail)
         _session_models(out, ctx.detail)
         _session_files(out, ctx.detail)
-    if ctx.short:
-        if ctx.session:
-            _session_phases(out, ctx)
-        else:
-            if ctx.shows("activities"):
-                _activities(out, stats, 8)
-            if ctx.shows("models"):
-                _models(out, stats, 5)
-            if ctx.shows("sessions"):
-                _heaviest_sessions(out, stats, ctx, ctx.rows)
-        out.add()
-        out.add(" " + s.dim(L("To skrócony raport. Domyślny: bez --short, wszystko: --full.",
-                              "This is the short report. The default one: without --short, "
-                              "everything: --full.")))
-        out.rule()
-        return out.render()
-    if ctx.shows("activities"):
-        _activities(out, stats, ctx.rows + 3 if not ctx.full else TOP_ROWS + 6)
-    if not ctx.detail and ctx.shows("models"):  # a single session lists its models in SESSION DETAILS
+    if ctx.has("activities"):  # 8 rows compact, 16 long
+        _activities(out, stats, ctx.rows + (6 if ctx.plan.long_tables else 3))
+    if not ctx.detail and ctx.has("models"):  # a single session lists its models in SESSION DETAILS
         _models(out, stats, ctx.rows)
     if ctx.session:
         _session_phases(out, ctx)
-    elif ctx.shows("sessions"):
+    elif ctx.has("sessions"):
         _heaviest_sessions(out, stats, ctx, ctx.rows)
-    if ctx.wants("time"):
+    if ctx.has("time"):
         _token_types(out, stats)
         _over_time(out, stats)
-    if ctx.wants("breakdown"):
+    if ctx.has("breakdown"):
         _breakdowns(out, stats, ctx)
-    if ctx.wants("cache"):
+    if ctx.has("cache"):
         _context_length(out, stats)
         _expired_cache(out, stats)
         _rereads(out, stats)
-    if ctx.wants("bash"):
+    if ctx.has("bash"):
         _bash_noise(out, stats)
-    if ctx.wants("skills"):
+    if ctx.has("skills"):
         _skills(out, stats, ctx.namer, ctx.rows)
-    if ctx.wants("map"):
+    if ctx.has("map"):
         _project_map(out, stats)
-    if ctx.shows("tips"):
+    if ctx.has("tips"):
         out.header(L("CO MOŻNA POPRAWIĆ", "WHAT YOU COULD IMPROVE"))
         for tip in tips(stats, ctx):
             out.bullet(tip)
     out.add()
-    missing = [f for key, f in _FLAGS if not ctx.wants(key)]
+    missing = [f for key, f in _FLAGS if not ctx.has(key)]
     if missing:
         out.add(" " + s.dim(L("Więcej szczegółów: ", "More detail: ") + " ".join(missing)
                             + L("  albo --full (wszystko)", "  or --full (everything)")))

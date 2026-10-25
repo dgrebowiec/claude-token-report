@@ -6,7 +6,7 @@
 |---|------|--------|
 | 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | DONE |
 | 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | DONE |
-| 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | TODO |
+| 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | DONE |
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | TODO |
 | 5 | Stopka „Ustawienia tego raportu” | TODO |
 | 6 | `--dry-run`: co pokaże raport, bez liczenia | TODO |
@@ -347,6 +347,8 @@ jasnym błędem; raport i konfigurator mówią, co pokazano, czego nie i dlaczeg
 
 - 2026-10-25 (krok 2) — tekst pomocy `--configure` przepisany na `compact` / `long` już w kroku 2 (stare nazwy
   poziomów przestały istnieć); reszta pomocy i README zostaje w kroku 8.
+- 2026-10-25 (krok 3) — `ReportContext.wants`/`shows` zastąpione jedną metodą `has(element)` (= `plan.has`),
+  zamiast dwóch metod o tym samym działaniu.
 
 ## Otwarte pytania
 

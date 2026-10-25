@@ -231,7 +231,41 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("WHERE THE TOKENS GO", out)
         self.assertNotIn("EXPIRED CACHE", out)
         self.assertNotIn("PROJECT MAP", out)
-        self.assertIn("without --short", out)
+        self.assertNotIn("WHAT YOU COULD IMPROVE", out)  # --short has no tips
+        self.assertNotIn("without --short", out)  # no separate short mode any more
+        self.assertIn("More detail: --time --breakdown", out)
+
+    def test_short_is_a_set_of_elements(self):
+        out = self.run_cli("--all", "--short", "--cache", "--bash")
+        self.assertIn("EXPIRED CACHE", out)
+        self.assertIn("HEAVIEST CONVERSATIONS", out)
+        more = out.split("More detail:")[1]
+        self.assertNotIn("--bash", more)  # the section is in the report (the data has no noise)
+        self.assertNotIn("--cache", more)
+        short = self.run_cli("--all", "--short")
+        long = self.run_cli("--all", "--short", "--long")
+        self.assertNotIn("SUBAGENTS BY TYPE", long)
+        # long tables: the same sections, the short set; all rankings follow --long
+        heads = [l for l in short.splitlines() if l.startswith("── ")]
+        self.assertEqual(heads, [l for l in long.splitlines() if l.startswith("── ")])
+
+    def test_html_short_keeps_comparison_and_daily(self):
+        path = os.path.join(self.tmp.name, "r.html")
+        self.run_cli("--all", "--short", "--diff", "--html", path)
+        with open(path, encoding="utf-8") as f:
+            page = f.read()
+        self.assertIn("Heaviest conversations", page)
+        self.assertNotIn("What you could improve", page)
+        self.assertNotIn("This is the short report", page)
+        self.run_cli("--days", "3650", "--short", "--diff", "--html", path)
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("<h2>Comparison", f.read())
+        self.run_cli("--all", "--short", "--daily", "--html", path)
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("Day by day", f.read())
+        self.run_cli("--all", "--short", "--cache", "--html", path)
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("Cache and repeats", f.read())
 
     def test_session_and_list(self):
         out = self.run_cli("--session", "1111")
@@ -245,6 +279,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("src/login.py", out)
         short = self.run_cli("--session", "1111", "--short")
         self.assertIn("SESSION DETAILS", short)
+        self.assertIn("SESSION PHASES", short)
         self.assertNotIn("TOKEN TYPES", short)
         listing = self.run_cli("--list")
         self.assertIn(SESSION[:8], listing)

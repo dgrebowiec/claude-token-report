@@ -75,3 +75,49 @@ Plan: [report-options.md](report-options.md)
   - Tekst pomocy `--configure` poprawiony już teraz (mówił o minimal/normal/detailed, które przestały istnieć);
     reszta pomocy i README — krok 8.
   - Opisy poziomów podają faktyczne liczby („rankingi po 5 wierszy (czynności po 8)”), nie samo „5 wierszy”.
+
+## 2026-10-25 — Krok 3: Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania
+
+- Status: DONE.
+- Zrobione:
+  - `context.py`: `ReportContext` bez pól `short`, `full`, `only_chosen`, `sections`, `core`; pole
+    `plan: ReportPlan` (domyślnie plan raportu domyślnego — `_default_plan`, import lokalny, bo `options`
+    importuje `context`); `wants`/`shows` zastąpione jedną metodą `has(element)` = `plan.has`; `rows` z
+    `plan.long_tables`.
+  - `cli.py`: adapter `_apply_plan` usunięty, plan podawany do `ReportContext(..., plan=plan)`; zbędne importy
+    (`SECTIONS`, `ReportPlan`) usunięte.
+  - `report_text.text_report`, `report_html.html_report`: gałęzie `if ctx.short:` usunięte, jedna ścieżka;
+    długości z planu (tekst: czynności `ctx.rows + 3/6` = 8/16; HTML: 8/20, rozmowy `rows + 5` przy long).
+    Stopka „To skrócony raport…” usunięta; podpowiedź „Więcej szczegółów” (`_FLAGS`/`_more`) liczona z planu,
+    teraz także w `--short`. HTML: `_comparison`/`_daily` zawsze, gdy są dane. Import `TOP_ROWS` w HTML usunięty.
+  - `tips.py`: `ctx.has(...)`; zachowanie dla `ctx=None` bez zmian.
+  - Testy: `test_waste` — `ReportContext(..., plan=ReportPlan(ELEMENTS, long_tables=True))` zamiast `full=True`,
+    nowy przypadek planu `--short --bash` (sekcja bash w tekście i HTML); `test_end_to_end` — `test_short`
+    (brak starej stopki, jest „More detail”), nowe `test_short_is_a_set_of_elements` i
+    `test_html_short_keeps_comparison_and_daily`, `--session --short` ma fazy sesji.
+  - `docs/references/report-options.md`: presety jako zestawy elementów, „Jedna ścieżka renderowania”,
+    bloki pojedynczej sesji, `tips`; usunięte ograniczenie `--short --long`.
+- Weryfikacja:
+  - `python3 -m unittest` — 92 testy OK (było 90).
+  - `grep -n "ctx.short\|ctx.full\|only_chosen" token_report/` — pusto.
+  - HTML (scratchpad, `CLAUDE_TOKEN_REPORT_CONFIG` na nieistniejący plik w scratchpadzie, okres 15–21.10):
+    `--short --diff` → `<h2>Comparison` z „… vs 2026-10-08..2026-10-14 (7 days)”, potem czynności, modele,
+    rozmowy; `--short --daily` → `<h2>Day by day`; żaden plik nie zawiera „short report”.
+  - Porównanie przed/po (skrypt zrzucający 22 warianty: tekst, HTML, MD; zrzut przed zmianą odtwarzalny 1:1):
+    bez zmian — domyślny tekst, HTML, `--diff`, `--daily`, `--diff --daily --html`, `--long`, `--cache --skills`,
+    `--session` (tekst i HTML). `--full` i domyślny MD różnią się tylko liczbą linii plików `report_text.py`,
+    `report_html.py`, `cli.py` w mapie projektu (pliki zmieniły się w tym kroku) — nie zmiana raportu.
+- Różnice celowe (tylko presety `--short` i `--session --short`):
+  - `--short` (tekst/MD): zamiast „To skrócony raport…” — „More detail: …” i linia o `--explain`.
+  - `--short --long`: czynności 16 wierszy i modele do 10 (wcześniej sztywno 8 / 5).
+  - `--short --bash`: sekcja BASH NOISE jest w raporcie (wcześniej ignorowana).
+  - `--short --html`: dochodzi blok „Co znaczą tokeny surowe i ważone” (`_explanation`) i „Więcej szczegółów”;
+    czynności 8 zamiast 10, modele 5 zamiast do 12 (jak w raporcie domyślnym); z `--diff` / `--daily`
+    są porównanie / „dzień po dniu”.
+  - `--session --short`: tekst — dochodzi „WHERE THE TOKENS GO” przed fazami sesji (czynności są w zestawie
+    `--short`); HTML — dochodzi „Where the tokens go” i objaśnienie. Fazy sesji (`_session_phases`) i szczegóły
+    sesji zostają.
+- Decyzje / odstępstwa:
+  - Zamiast dwóch metod `wants`/`shows` jedna `ReportContext.has` (obie i tak znaczyłyby `plan.has`).
+  - Brak danych o szumie Basha w syntetycznych transkryptach e2e — obecność sekcji bash przy `--short --bash`
+    sprawdzana w `test_waste` (dane z szumem) i w e2e przez brak `--bash` w „More detail”.
