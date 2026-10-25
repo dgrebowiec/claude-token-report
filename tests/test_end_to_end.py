@@ -442,7 +442,7 @@ class EndToEndTest(unittest.TestCase):
 
     def test_configure_saves_through_the_line_editor(self):
         from token_report import configure
-        answers = iter(["l", "5", "w"])  # compact -> long, then toggle "time"
+        answers = iter(["l", "5", "w", "y"])  # compact -> long, then toggle "time"
         saved = configure.run(__import__("pathlib").Path(self.config), ask=lambda _p: next(answers),
                               out=lambda _t: None)
         self.assertEqual(str(saved), self.config)
@@ -450,6 +450,53 @@ class EndToEndTest(unittest.TestCase):
             data = json.load(f)
         self.assertEqual(data["level"], "long")
         self.assertEqual(data["elements"], ["activities", "models", "sessions", "tips", "time"])
+
+    def test_configure_line_editor_shows_the_summary_before_saving(self):
+        from pathlib import Path
+        from token_report import configure
+        self.save_settings("long", ["activities", "bash"])
+        printed, prompts = [], []
+        answers = iter(["w", "n", "q"])  # summary, decline, quit
+
+        def ask(prompt):
+            prompts.append(prompt)
+            return next(answers)
+        from pathlib import Path as _P
+        before = _P(self.config).read_text(encoding="utf-8")
+        self.assertIsNone(configure.run(Path(self.config), ask=ask, out=printed.append))
+        text = "\n".join(printed)
+        self.assertIn("SETTINGS SUMMARY", text)
+        self.assertIn("   ✓ bash        n/a           compared", text)
+        self.assertIn("   · skills      yes           not compared", text)
+        self.assertIn("⚠ long does not change: bash (fixed length, no tables)", text)
+        self.assertIn("not saved — back to editing", text)
+        self.assertTrue(prompts[1].startswith("save?"))
+        self.assertEqual(_P(self.config).read_text(encoding="utf-8"), before)
+        # s: the summary only; the editor is not printed again before the next command
+        printed.clear()
+        answers = iter(["s", "q"])
+        configure.run(Path(self.config), ask=lambda _p: next(answers), out=printed.append)
+        after_summary = printed[printed.index(" SETTINGS SUMMARY"):]
+        self.assertNotIn("commands:", "\n".join(after_summary))
+
+    def test_configure_full_screen_editor_confirms_in_the_summary(self):
+        from token_report import configure
+        from token_report.settings import Settings
+        editor = configure.Editor(Settings(level="long", elements=["activities", "map"]))
+        self.assertIsNone(editor.handle_key("enter"))  # ENTER opens the summary, does not save
+        screen = "\n".join(configure.strip_ansi(line) for line in editor.screen(100, 40))
+        self.assertIn("SETTINGS SUMMARY", screen)
+        self.assertIn("⚠ long does not change: map", screen)
+        self.assertIn("ENTER/w save", screen)
+        self.assertIsNone(editor.handle_key("space"))  # any other key: back, nothing toggled
+        self.assertFalse(editor.summary_open)
+        self.assertEqual(editor.settings.elements, ["activities", "map"])
+        self.assertIsNone(editor.handle_key("s"))
+        self.assertTrue(editor.summary_open)
+        self.assertEqual(editor.handle_key("w"), "save")
+        editor.summary_open = False
+        self.assertIn("s summary", configure.key_help())
+        self.assertNotIn("s", configure.KEYS.values())
 
     def test_configure_section_preview_and_reset(self):
         from token_report import configure
@@ -464,7 +511,7 @@ class EndToEndTest(unittest.TestCase):
 
         # Test restoring defaults with 'd'
         self.save_settings("detailed", ["bash", "skills"])
-        answers = iter(["d", "w"])
+        answers = iter(["d", "w", "y"])
         saved = configure.run(__import__("pathlib").Path(self.config), ask=lambda _p: next(answers),
                               out=lambda _t: None)
         with open(self.config, encoding="utf-8") as f:

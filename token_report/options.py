@@ -70,6 +70,32 @@ def no_comparison_note(elements: Tuple[str, ...]) -> str:
     return L("Bez porównania: ", "Not compared: ") + ", ".join(missing) if missing else ""
 
 
+def warnings_for(settings: Settings) -> List[str]:
+    """the saved settings that would have no effect, with the reason (the configurator's summary
+    screen); the same ELEMENT_INFO as the report footer and --dry-run"""
+    chosen = tuple(settings.shown())
+    out = []
+    fixed = [e for e in chosen if not ELEMENT_INFO[e].has_tables]
+    if settings.level == "long" and fixed:
+        if len(fixed) == len(chosen):
+            out.append(L("long nic nie zmienia: żaden włączony element nie ma tabel o zmiennej "
+                         "długości (" + ", ".join(fixed) + ")",
+                         "long changes nothing: no element that is on has tables of variable "
+                         "length (" + ", ".join(fixed) + ")"))
+        else:
+            out.append(L("long nie zmienia: " + ", ".join(fixed) + " (stała długość, bez tabel)",
+                         "long does not change: " + ", ".join(fixed)
+                         + " (fixed length, no tables)"))
+    missing = uncompared(chosen)
+    if missing and len(missing) == len(chosen):
+        out.append(L("wszystkie włączone elementy bez porównania — --diff pokaże tylko liczby ogólne",
+                     "no element that is on has a comparison — --diff will show only the overall "
+                     "numbers"))
+    elif missing:
+        out.append(L("--diff nie porówna: ", "--diff will not compare: ") + ", ".join(missing))
+    return out
+
+
 class OptionsError(ValueError):
     """A combination of options that cannot work; the message is meant for the user."""
 

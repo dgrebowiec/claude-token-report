@@ -263,3 +263,40 @@ Plan: [report-options.md](report-options.md)
     `--short --bash --diff`. Zwykły raport bez `--dry-run` działa jak przedtem; `--dir /nieistniejacy`
     bez `--dry-run` dalej kończy się błędem o braku katalogu.
 - Odstępstwa: brak. Kolorów w wyniku `--dry-run` nie ma (zwykły tekst, także w terminalu).
+
+## 2026-10-25 — Krok 7: Konfigurator: ekran z pełną listą opcji i ich stanem
+
+- Status: DONE.
+- Zrobione:
+  - `options.py`: `warnings_for(settings) -> List[str]` — czysta funkcja na `ELEMENT_INFO` / `uncompared`
+    (ta sama tabela co stopka i `--dry-run`): „long nie zmienia: …” / „long nic nie zmienia: …”,
+    „--diff nie porówna: …” / „wszystkie włączone elementy bez porównania — --diff pokaże tylko liczby ogólne”.
+  - `configure.py`: `summary_lines(settings, color)` — tytuł, długość tabel, wiersz podsumowania (zawsze) i każdy
+    element z `ELEMENTS`: `✓`/`·`, „długie tabele” `tak`/`nie dotyczy`, „--diff” `porównanie`/`bez porównania`,
+    legenda, `⚠` z `warnings_for` (albo „✓ każde ustawienie ma skutek”). `Editor.summary_open`,
+    `Editor.summary_screen()`; `screen()` pokazuje podsumowanie, gdy jest otwarte.
+  - Pełny ekran: `s` albo ENTER / `w` otwiera podsumowanie; tam ENTER / `w` zapisuje, ctrl-c wychodzi, inny klawisz
+    wraca do edycji (klawisz nie jest wykonywany). Liniowy `run`: `w` → podsumowanie + pytanie „zapisać?”
+    (`t`/`tak`/`y`/`yes`/`w` zapisuje, inne wraca), `s` → samo podsumowanie bez ponownego wypisania edytora,
+    pusta linia → ekran edycji (wcześniej „nieznane polecenie”). `key_help` i `line_help` uzupełnione.
+  - Nowy klawisz `s`: nie występuje w `KEYS` (tylko sekwencje strzałek, esc, spacja, enter, ctrl-c), w akcjach
+    `handle_key` (k/j/x/l/a/n/r/d/q/w, cyfry) ani w poleceniach `handle_line`.
+  - Testy: `WarningsForTest` (7) w `tests/test_options.py`; w `tests/test_end_to_end.py` liniowy front-end
+    (`ask=`: podsumowanie przed zapisem, odmowa nie zapisuje, `s`) i `Editor` (ENTER → podsumowanie, inny klawisz
+    → powrót, `s`, zapis); dwa istniejące testy zapisu dostały odpowiedź potwierdzającą (`"y"`).
+  - `docs/references/report-options.md`: sekcja „Konfigurator (`--configure`): ekran podsumowania” (przykład,
+    oznaczenia, ostrzeżenia), testy.
+- Weryfikacja:
+  - `python3 -m unittest` — 119 testów OK (było 110).
+  - Ręcznie liniowy konfigurator przez stdin (`printf 'w\nn\n9\nw\nt\n' | … --configure -l pl`,
+    `CLAUDE_TOKEN_REPORT_CONFIG` na plik w scratchpadzie z `long` + activities, sessions, cache, bash):
+    podsumowanie, odmowa → powrót, przełączenie `skills`, podsumowanie, zapis; plik zapisany w nowym formacie.
+    `s` + pusta linia + `q` (en) → podsumowanie, ekran edycji, „not saved”.
+  - Zgodność ze stopką: dla tej konfiguracji `--diff --dry-run` — „bez zmian (bez tabel): cache, bash” i
+    „bez porównania: sessions, skills”, tak samo jak ⚠ w podsumowaniu (też test `test_agrees_with_the_report_footer`).
+  - Pełnoekranowy `run_tui` nie uruchamiany interaktywnie — sprawdzony przez `Editor.handle_key` / `screen()`.
+- Decyzje / odstępstwa:
+  - Wiersz „podsumowanie (zawsze w raporcie)” dodany nad elementami — `--diff` zawsze porównuje liczby ogólne.
+  - Ostrzeżenie „--diff nie porówna: …” pojawia się także dla częściowego braku porównania (też przy konfiguracji
+    domyślnej: sessions, tips) — tak samo mówi stopka raportu z `--diff`.
+  - `s` w pełnym ekranie otwiera ten sam ekran co ENTER (z możliwością zapisu ENTER / `w`).

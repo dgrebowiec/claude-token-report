@@ -10,7 +10,7 @@
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | DONE |
 | 5 | Stopka „Ustawienia tego raportu” | DONE |
 | 6 | `--dry-run`: co pokaże raport, bez liczenia | DONE |
-| 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | TODO |
+| 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | DONE |
 | 8 | README i dokumentacja opcji | TODO |
 
 Statusy: `TODO` — nie zaczęty, `IN_PROGRESS` — w trakcie (może być tylko jeden), `DONE` — ukończony i zweryfikowany.

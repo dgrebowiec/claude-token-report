@@ -15,7 +15,7 @@ from typing import Callable, List, Optional
 
 from . import settings as settings_module
 from .i18n import L
-from .options import ELEMENT_INFO
+from .options import ELEMENT_INFO, uncompared, warnings_for
 from .settings import DEFAULT_ELEMENTS, ELEMENTS, LEVELS, Settings, describe, describe_level
 
 REVERSE = "\033[7m"
@@ -37,8 +37,10 @@ def strip_ansi(text: str) -> str:
 
 def key_help() -> str:
     return L(
-        "↑↓ wybór   SPACJA włącz/wyłącz   ←→ długość tabel   a wszystko   n nic   r/d domyślne   ENTER zapisz   q wyjście",
-        "↑↓ select   SPACE toggle   ←→ table length   a all   n none   r/d defaults   ENTER save   q quit"
+        "↑↓ wybór   SPACJA włącz/wyłącz   ←→ długość tabel   a wszystko   n nic   r/d domyślne   "
+        "s podsumowanie   ENTER zapisz (po podsumowaniu)   q wyjście",
+        "↑↓ select   SPACE toggle   ←→ table length   a all   n none   r/d defaults   "
+        "s summary   ENTER save (after the summary)   q quit"
     )
 
 
@@ -46,11 +48,58 @@ def line_help() -> str:
     return L("""polecenia:
   <n>     włącz lub wyłącz element n    l       zmień długość tabel (compact / long)
   a       wszystkie elementy            n       żaden (zostaje pierwszy)
-  r / d   przywróć domyślne             w       zapisz i wyjdź          q   wyjdź bez zapisu""",
+  r / d   przywróć domyślne             s       podsumowanie (bez zapisu)
+  w       podsumowanie, potem zapis po potwierdzeniu (t)                q   wyjdź bez zapisu""",
              """commands:
   <n>     toggle element n              l       switch table length (compact / long)
   a       all elements                  n       none (the first one stays)
-  r / d   restore defaults              w       save and exit           q   quit without saving""")
+  r / d   restore defaults              s       summary (nothing saved)
+  w       summary, then save once confirmed (y)                         q   quit without saving""")
+
+
+SUMMARY_KEYS_HELP = ("ENTER/w zapisz   inny klawisz: wróć do edycji",
+                     "ENTER/w save   any other key: back to editing")
+CONFIRM = ("t", "tak", "y", "yes", "w")  # answers that confirm saving in the line-based editor
+
+
+def summary_lines(settings: Settings, color: bool = True) -> List[str]:
+    """The summary screen: every element with its state, what long tables and --diff do for it,
+    and the warnings (options.warnings_for) about settings that would have no effect."""
+    b, d, g, y, bc, rst = ((BOLD, DIM, GREEN, YELLOW, BOLD_CYAN, RESET) if color
+                           else ("", "", "", "", "", ""))
+    yes, na = L("tak", "yes"), L("nie dotyczy", "n/a")
+    compared, not_compared = L("porównanie", "compared"), L("bez porównania", "not compared")
+    summary = L("podsumowanie", "summary")
+    width = max(len(summary), *(len(e) for e in ELEMENTS)) + 2
+    col = max(len(L("długie tabele", "long tables")), len(yes), len(na)) + 3
+
+    def row(mark: str, name: str, tables: str, diff: str, note: str = "") -> str:
+        return f"   {mark} {name:<{width}}{tables:<{col}}{diff}{note}"
+
+    lines = [f" {bc}{L('PODSUMOWANIE USTAWIEŃ', 'SETTINGS SUMMARY')}{rst}", "",
+             f" {b}{L('Długość tabel', 'Table length')}{rst}: {b}{settings.level}{rst}  {d}"
+             + (L("rankingi po 10 wierszy (czynności po 16)", "rankings of 10 rows (activities 16)")
+                if settings.level == "long" else
+                L("rankingi po 5 wierszy (czynności po 8)", "rankings of 5 rows (activities 8)"))
+             + rst, "",
+             f"{b}" + row(" ", "element", L("długie tabele", "long tables"), "--diff") + rst,
+             f"{g}" + row("✓", summary, na, compared, L("  (zawsze w raporcie)", "  (always in the report)")) + rst]
+    chosen = settings.shown()
+    for e in ELEMENTS:
+        info = ELEMENT_INFO[e]
+        line = row("✓" if e in chosen else "·", e, yes if info.has_tables else na,
+                   not_compared if uncompared((e,)) else compared)
+        lines.append(f"{g}{line}{rst}" if e in chosen else f"{d}{line}{rst}")
+    lines += ["", f" {d}✓ {L('włączony', 'on')}   · {L('wyłączony', 'off')}   "
+                  + L("długie tabele: czy long wydłuża tabele elementu",
+                      "long tables: whether long makes the tables of the element longer") + rst,
+              f" {d}--diff: " + L("czy porównanie z poprzednim okresem ma dla niego część",
+                                  "whether the comparison with the previous window has a part for it")
+              + rst, ""]
+    warnings = warnings_for(settings)
+    lines += [f" {y}⚠ {w}{rst}" for w in warnings] or [
+        f" {g}✓ {L('każde ustawienie ma skutek', 'every setting has an effect')}{rst}"]
+    return lines
 
 
 def section_preview(element: str, level: str, width: int = 86, color: bool = True) -> List[str]:
@@ -234,6 +283,7 @@ class Editor:
         self.dirty = False
         self.message = ""
         self._quit_armed = False
+        self.summary_open = False  # the summary screen (s, or ENTER / w before saving)
 
     # --- operations ---
 
@@ -280,8 +330,16 @@ class Editor:
     # --- input ---
 
     def handle_key(self, key: str) -> Optional[str]:
-        """One key of the full-screen editor. Returns 'save', 'quit' or None."""
+        """One key of the full-screen editor. Returns 'save', 'quit' or None. ENTER / w open the
+        summary first; ENTER / w there saves, any other key goes back to editing."""
         self.message = ""
+        if self.summary_open:
+            if key in ("enter", "w"):
+                return "save"
+            if key == "ctrl-c":
+                return "quit"
+            self.summary_open = False
+            return None
         if key in ("q", "esc", "ctrl-c"):
             if self.dirty and not self._quit_armed and key != "ctrl-c":
                 self._quit_armed = True
@@ -290,8 +348,9 @@ class Editor:
                 return None
             return "quit"
         self._quit_armed = False
-        if key in ("enter", "w"):
-            return "save"
+        if key in ("enter", "w", "s"):
+            self.summary_open = True
+            return None
         actions = {
             "up": lambda: self.move_cursor(-1), "k": lambda: self.move_cursor(-1),
             "down": lambda: self.move_cursor(1), "j": lambda: self.move_cursor(1),
@@ -312,10 +371,15 @@ class Editor:
         return None
 
     def handle_line(self, command: str) -> Optional[str]:
-        """One text command of the line-based editor. Returns 'save', 'quit' or None."""
+        """One text command of the line-based editor. Returns 'confirm' (w: the summary, then
+        save once confirmed), 'summary' (s), 'quit' or None."""
         self.message = ""
         if command == "w":
-            return "save"
+            return "confirm"
+        if command == "s":
+            return "summary"
+        if command == "":
+            return None  # just show the editor again
         if command == "q":
             return "quit"
         if command == "l":
@@ -372,7 +436,15 @@ class Editor:
             lines.append(row)
         return lines
 
+    def summary_screen(self) -> List[str]:
+        title = f" {BOLD_CYAN}⚙  CLAUDE CODE TOKEN REPORT — {L('KONFIGURACJA', 'CONFIGURATION')}{RESET}"
+        if self.dirty:
+            title += f"  {YELLOW}({L('niezapisane zmiany', 'unsaved changes')}){RESET}"
+        return [title, "", *summary_lines(self.settings), "", f" {DIM}{L(*SUMMARY_KEYS_HELP)}{RESET}"]
+
     def screen(self, width: int, height: int = 34) -> List[str]:
+        if self.summary_open:
+            return self.summary_screen()
         s = self.settings
         title = f" {BOLD_CYAN}⚙  CLAUDE CODE TOKEN REPORT — {L('KONFIGURACJA', 'CONFIGURATION')}{RESET}"
         if self.dirty:
@@ -536,8 +608,11 @@ def run(path: Optional[Path] = None, ask: Callable[[str], str] = input,
     """Line-based editor. Returns the path it saved to, or None when the user quit."""
     path = path or settings_module.settings_path()
     editor = Editor(copy.deepcopy(settings_module.load(path) or Settings()))
+    redraw = True
     while True:
-        show(editor, out)
+        if redraw:
+            show(editor, out)
+        redraw = True
         try:
             command = ask("> ").strip()
         except EOFError:
@@ -545,6 +620,25 @@ def run(path: Optional[Path] = None, ask: Callable[[str], str] = input,
         result = editor.handle_line(command)
         if editor.message:
             out(editor.message)
+        if result in ("summary", "confirm"):
+            out("")
+            for line in summary_lines(editor.settings, color=False):
+                out(line.rstrip())
+            out("")
+        if result == "summary":
+            out(L("w = zapisz, Enter = ekran edycji", "w = save, Enter = the editor"))
+            redraw = False
+            continue
+        if result == "confirm":
+            try:
+                answer = ask(L("zapisać? t = tak, inne = wróć do edycji > ",
+                               "save? y = yes, anything else = back to editing > ")).strip().lower()
+            except EOFError:
+                answer = ""
+            if answer in CONFIRM:
+                result = "save"
+            else:
+                out(L("nie zapisano — wracasz do edycji", "not saved — back to editing"))
         if result == "save":
             saved = settings_module.save(editor.settings, path)
             out(L(f"zapisano {saved}", f"saved to {saved}"))

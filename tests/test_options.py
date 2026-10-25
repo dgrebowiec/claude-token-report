@@ -9,7 +9,7 @@ from unittest import mock
 from token_report import i18n
 from token_report.cli import build_parser, main
 from token_report.options import (ELEMENT_INFO, OptionsError, describe_plan,
-                                  no_comparison_note, resolve, uncompared)
+                                  no_comparison_note, resolve, uncompared, warnings_for)
 from token_report.settings import CORE, ELEMENTS, Settings, describe_level, from_dict
 
 
@@ -264,6 +264,52 @@ class DescribePlanTest(unittest.TestCase):
                                           os.path.join(home, ".claude", "x.json")}):
             line = describe_plan(plan(saved=Settings(elements=["models"])))[0]
         self.assertIn("(~/.claude/x.json)", line)
+
+
+class WarningsForTest(unittest.TestCase):
+    """the configurator's summary: settings that would have no effect"""
+    def setUp(self):
+        i18n.set_lang("en")
+
+    def test_default_compact(self):
+        self.assertEqual(warnings_for(Settings()), ["--diff will not compare: sessions, tips"])
+
+    def test_long_names_the_elements_without_tables(self):
+        w = warnings_for(Settings(level="long", elements=["activities", "cache", "bash"]))
+        self.assertEqual(w, ["long does not change: cache, bash (fixed length, no tables)"])
+
+    def test_long_with_no_element_with_tables(self):
+        w = warnings_for(Settings(level="long", elements=["cache", "map"]))
+        self.assertTrue(w[0].startswith("long changes nothing:"), w)
+        self.assertIn("cache, map", w[0])
+        self.assertEqual(w[1], "--diff will not compare: map")
+
+    def test_every_element_without_comparison(self):
+        w = warnings_for(Settings(elements=["sessions", "skills"]))
+        self.assertEqual(w, ["no element that is on has a comparison — "
+                             "--diff will show only the overall numbers"])
+
+    def test_no_warnings(self):
+        self.assertEqual(warnings_for(Settings(level="long", elements=["activities", "models"])), [])
+        self.assertEqual(warnings_for(Settings(elements=["time", "bash"])), [])
+
+    def test_agrees_with_the_report_footer(self):
+        for saved in (Settings(), Settings(level="long", elements=["activities", "cache", "skills"]),
+                      Settings(elements=["models", "map", "bash"])):
+            p = plan("--diff", saved=saved)
+            footer = describe_plan(p)[0]
+            missing = uncompared(p.elements)
+            note = "--diff will not compare: " + ", ".join(missing)
+            self.assertIn(", not compared: " + ", ".join(missing), footer)
+            self.assertIn(note, warnings_for(saved))
+
+    def test_polish(self):
+        i18n.set_lang("pl")
+        try:
+            w = warnings_for(Settings(level="long", elements=["activities", "bash"]))
+            self.assertEqual(w, ["long nie zmienia: bash (stała długość, bez tabel)"])
+        finally:
+            i18n.set_lang("en")
 
 
 class CliErrorTest(unittest.TestCase):

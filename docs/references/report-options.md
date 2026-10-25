@@ -255,6 +255,60 @@ Przykład — konfiguracja `{"level":"compact","elements":["activities","session
    Bez konfiguracji: --no-config · zmiana: --configure · tokeny surowe i ważone: --explain
 ```
 
+## Konfigurator (`--configure`): ekran podsumowania
+
+Ekran z pełną listą elementów i ich stanem. Otwiera go klawisz `s` (pełny ekran i tryb liniowy) oraz —
+zawsze przed zapisem — ENTER / `w`. W pełnym ekranie ENTER / `w` na podsumowaniu zapisuje, każdy inny klawisz
+wraca do edycji (bez zmian). W trybie liniowym (stdin nie jest terminalem) `w` pokazuje podsumowanie i pyta
+„zapisać?” — `t` / `tak` / `y` / `yes` / `w` zapisuje, cokolwiek innego wraca do edycji; `s` pokazuje samo
+podsumowanie, pusta linia — znów ekran edycji.
+
+Przykład (konfiguracja `{"level":"long","elements":["activities","sessions","cache","bash","skills"]}`):
+
+```
+ PODSUMOWANIE USTAWIEŃ
+
+ Długość tabel: long  rankingi po 10 wierszy (czynności po 16)
+
+     element       długie tabele   --diff
+   ✓ podsumowanie  nie dotyczy     porównanie  (zawsze w raporcie)
+   ✓ activities    tak             porównanie
+   · models        tak             porównanie
+   ✓ sessions      tak             bez porównania
+   · tips          nie dotyczy     bez porównania
+   · time          nie dotyczy     porównanie
+   · breakdown     nie dotyczy     porównanie
+   ✓ cache         nie dotyczy     porównanie
+   ✓ bash          nie dotyczy     porównanie
+   ✓ skills        tak             bez porównania
+   · map           nie dotyczy     bez porównania
+
+ ✓ włączony   · wyłączony   długie tabele: czy long wydłuża tabele elementu
+ --diff: czy porównanie z poprzednim okresem ma dla niego część
+
+ ⚠ long nie zmienia: cache, bash (stała długość, bez tabel)
+ ⚠ --diff nie porówna: sessions, skills
+```
+
+Oznaczenia:
+
+| Oznaczenie | Znaczenie |
+|---|---|
+| `✓` / `·` | element włączony / wyłączony w zapisanej konfiguracji (podsumowanie jest zawsze) |
+| „długie tabele”: `tak` / `nie dotyczy` | `ELEMENT_INFO[e].has_tables` — czy `long` wydłuża tabele elementu |
+| „--diff”: `porównanie` / `bez porównania` | `ELEMENT_INFO[e].comparable` — czy blok porównania ma część dla elementu |
+| `⚠ …` | ustawienie bez skutku, z powodem (`options.warnings_for`) |
+
+Ostrzeżenia (`options.warnings_for(settings)`, liczone tylko dla włączonych elementów):
+- `long` i są włączone elementy bez tabel → „long nie zmienia: …”; gdy żaden włączony element nie ma tabel —
+  „long nic nie zmienia: …”;
+- część włączonych elementów bez porównania → „--diff nie porówna: …” (te same elementy, które stopka raportu
+  z `--diff` wymienia jako „bez porównania”); wszystkie bez porównania → „wszystkie włączone elementy bez
+  porównania — --diff pokaże tylko liczby ogólne”;
+- brak ostrzeżeń → „✓ każde ustawienie ma skutek”.
+
+Ostrzeżenia, stopka raportu i `--dry-run` korzystają z tej samej tabeli `ELEMENT_INFO`, więc nie mogą się rozjechać.
+
 ## Plik konfiguracji i migracja starych poziomów
 
 `~/.claude/claude-token-report.json` (albo `CLAUDE_TOKEN_REPORT_CONFIG`): `{"level": "compact" | "long",
@@ -327,4 +381,9 @@ w `tests/test_options.py` (bazy `default`, `config` + flaga, `short` z `--diff -
 po polsku, ścieżka z `~`), `test_every_format_ends_with_the_settings_footer` (tekst, HTML, MD mówią to samo,
 stopka raz) i `test_footer_follows_the_preset` w `tests/test_end_to_end.py`. `--dry-run`: `DryRunTest` w `tests/test_options.py` (plan dla `--short --bash --diff`,
 stopka = `describe_plan`, konfiguracja + flaga sekcji, pliki niezapisane, sesja nieszukana, błędy; odczyt
-transkryptów — `load`, `find_session`, `recent_sessions` — kończy test błędem).
+transkryptów — `load`, `find_session`, `recent_sessions` — kończy test błędem). Konfigurator: `WarningsForTest`
+w `tests/test_options.py` (domyślna konfiguracja, `long` z elementami bez tabel i bez żadnego z tabelami, wszystkie
+bez porównania, brak ostrzeżeń, zgodność ze stopką, po polsku), `test_configure_line_editor_shows_the_summary_before_saving`
+(liniowy: podsumowanie przed zapisem, odmowa nie zapisuje, `s` bez ponownego ekranu edycji) i
+`test_configure_full_screen_editor_confirms_in_the_summary` (`Editor`: ENTER otwiera podsumowanie, inny klawisz
+wraca, `s`, zapis z podsumowania) w `tests/test_end_to_end.py`.
