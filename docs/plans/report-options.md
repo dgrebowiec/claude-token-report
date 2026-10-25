@@ -4,14 +4,14 @@
 
 | # | Krok | Status |
 |---|------|--------|
-| 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | TODO |
-| 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | TODO |
-| 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | TODO |
-| 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | TODO |
-| 5 | Stopka „Ustawienia tego raportu” | TODO |
-| 6 | `--dry-run`: co pokaże raport, bez liczenia | TODO |
-| 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | TODO |
-| 8 | README i dokumentacja opcji | TODO |
+| 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | DONE |
+| 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | DONE |
+| 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | DONE |
+| 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | DONE |
+| 5 | Stopka „Ustawienia tego raportu” | DONE |
+| 6 | `--dry-run`: co pokaże raport, bez liczenia | DONE |
+| 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | DONE |
+| 8 | README i dokumentacja opcji | DONE |
 
 Statusy: `TODO` — nie zaczęty, `IN_PROGRESS` — w trakcie (może być tylko jeden), `DONE` — ukończony i zweryfikowany.
 
@@ -345,7 +345,16 @@ jasnym błędem; raport i konfigurator mówią, co pokazano, czego nie i dlaczeg
 
 ## Zmiany planu
 
-<Puste na starcie.>
+- 2026-10-25 (krok 2) — tekst pomocy `--configure` przepisany na `compact` / `long` już w kroku 2 (stare nazwy
+  poziomów przestały istnieć); reszta pomocy i README zostaje w kroku 8.
+- 2026-10-25 (krok 3) — `ReportContext.wants`/`shows` zastąpione jedną metodą `has(element)` (= `plan.has`),
+  zamiast dwóch metod o tym samym działaniu.
+- 2026-10-25 (krok 5, decyzja koordynatora; rozstrzyga otwarte pytanie z kroku 4) — `--all --diff` → twardy
+  błąd w `options.resolve` (kod 2, jak `--session --diff`): cała historia nie ma poprzedniego okresu do
+  porównania. Innych okresów bez poprzedniego nie ma (`previous_window_start` → `None` tylko przy
+  `window.start is None`: `--all` i `--session` bez okresu, oba już błędem).
+- 2026-10-25 (krok 5) — `ReportPlan` dostaje pole `only` (elementy z `--only`), żeby stopka odróżniała je od
+  dopisanych flag sekcji (`origin` dla obu = `flag`).
 
 ## Otwarte pytania
 

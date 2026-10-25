@@ -121,6 +121,8 @@ class RenderTest(unittest.TestCase):
     def test_reports_mention_both_sections(self):
         from token_report.context import ReportContext
         from token_report.naming import Namer
+        from token_report.options import ReportPlan
+        from token_report.settings import ELEMENTS
         from token_report.report_html import html_report
         from token_report.report_text import text_report
         from token_report.stats import aggregate
@@ -132,7 +134,8 @@ class RenderTest(unittest.TestCase):
                                                                   "e-skill": 400})}
         calls = [_call(i, [("Bash", {"command": "git diff"})], [BIG]) for i in range(3)]
         stats = aggregate(calls, sessions, namer)
-        ctx = ReportContext("period", "~/.claude/projects", sessions, namer, calls, full=True)
+        full = ReportPlan(elements=ELEMENTS, long_tables=True)
+        ctx = ReportContext("period", "~/.claude/projects", sessions, namer, calls, plan=full)
         text = text_report(stats, ctx)
         self.assertIn("BASH NOISE", text)
         self.assertIn("git diff --stat", text)
@@ -143,9 +146,37 @@ class RenderTest(unittest.TestCase):
         self.assertIn("a-skill", page)
         private = text_report(aggregate(calls, sessions, Namer(private=True)),
                               ReportContext("p", "~", sessions, Namer(private=True), calls,
-                                           full=True))
+                                           plan=full))
         self.assertNotIn("a-skill", private)
         self.assertIn("skill-1", private)
+        # --short --bash: the short set plus the bash section, in both renderers
+        short_bash = ReportContext("p", "~", sessions, namer, calls,
+                                   plan=ReportPlan(elements=("activities", "models", "sessions", "bash")))
+        self.assertIn("BASH NOISE", text_report(stats, short_bash))
+        self.assertNotIn("SKILLS", text_report(stats, short_bash))
+        self.assertIn("Bash noise", html_report(stats, short_bash))
+
+    def test_diff_compares_the_bash_noise(self):
+        from token_report.context import ReportContext
+        from token_report.naming import Namer
+        from token_report.options import ReportPlan
+        from token_report.report_html import html_report
+        from token_report.report_text import text_diff
+        from token_report.stats import aggregate
+
+        i18n.set_lang("en")
+        namer = Namer(private=False)
+        sessions = {("proj", "s1"): SessionMeta("proj")}
+        noisy = [_call(i, [("Bash", {"command": "git diff"})], [BIG]) for i in range(3)]
+        stats = aggregate(noisy, sessions, namer)
+        prev = aggregate(noisy[:1], sessions, namer)
+        self.assertGreater(stats.waste.noisy_weighted, 0)
+        bash = ReportPlan(elements=("activities", "bash"))
+        ctx = ReportContext("now", "~", sessions, namer, noisy, plan=bash)
+        self.assertIn("Bash noise (long results with no limit)", text_diff(stats, prev, ctx))
+        self.assertIn("Bash noise (long results with no limit)", html_report(stats, ctx, prev))
+        ctx.plan = ReportPlan(elements=("activities",))
+        self.assertNotIn("Bash noise", text_diff(stats, prev, ctx))
 
 
 if __name__ == "__main__":

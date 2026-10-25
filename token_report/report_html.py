@@ -7,14 +7,16 @@ import os
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .classify import activity_name
-from .context import TOP_ROWS, ReportContext
+from .context import ReportContext
 from .daily import DayRow, daily_summary
 from .explain import explain_text
 from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_relative, pct,
                          side_name)
 from .hotspots import LARGE_FILE, Item, ProjectHotspots, column_name, limits_note, status
 from .i18n import L, get_lang, weekday
+from .options import describe_plan, no_comparison_note
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
+from .report_text import diff_takeaways
 from .session_detail import (SessionDetail, details_for, effort_name, fmt_duration,
                              ultracode_text)
 from .stats import (CTX_BUCKETS, FEW_CALLS, GAP_BUCKETS, LONG_CONTEXT, TOP_REBUILDS, Bucket, Stats,
@@ -107,6 +109,8 @@ def _explanation() -> str:
 
 
 def _comparison(stats: Stats, prev: Optional[Stats], ctx: ReportContext) -> str:
+    """--diff: the same parts as report_text.text_diff — the summary numbers always, a table for
+    each comparable element of the report, the takeaways, then the elements without a comparison"""
     if prev is None:
         return ""
 
@@ -115,21 +119,53 @@ def _comparison(stats: Stats, prev: Optional[Stats], ctx: ReportContext) -> str:
         return (f"<tr><td class=l>{E(name)}</td><td class=n>{fmt(a)}</td><td class=n>{fmt(b)}</td>"
                 f"<td class='n {cls}'>{arrow(a, b)} {fmt_change(a, b)}</td></tr>")
 
-    def activity_w(s: Stats, key: str) -> float:
-        return s.by_activity[key].weighted if key in s.by_activity else 0
+    def table(rows: List[str]) -> str:
+        return (f"<div class=wrap><table><tr><th></th><th class=n>{L('teraz', 'now')}</th>"
+                f"<th class=n>{L('wcześniej', 'before')}</th><th class=n>{L('zmiana', 'change')}"
+                f"</th></tr>{''.join(rows)}</table></div>")
+
+    def groups(title: str, cur: Mapping[str, Bucket], old: Mapping[str, Bucket],
+               names: Callable[[str], str] = str) -> str:
+        def w(g: Mapping[str, Bucket], key: str) -> float:
+            return g[key].weighted if key in g else 0.0
+        keys = sorted(set(cur) | set(old), key=lambda k: -w(cur, k) - w(old, k))[:12]
+        return f"<h3>{title}</h3>" + table([row(names(k), w(cur, k), w(old, k), fmt_tok)
+                                            for k in keys])
 
     rows = [row(L("wywołania modelu", "model calls"), stats.n_calls, prev.n_calls, fmt_int),
             row(L("tokeny surowe", "raw tokens"), stats.raw or 1, prev.raw, fmt_tok),
-            row(L("tokeny ważone", "weighted tokens"), stats.weighted, prev.weighted, fmt_tok),
-            row(L("średnio na wywołanie", "average per call"), stats.weighted / max(stats.n_calls, 1),
-                prev.weighted / max(prev.n_calls, 1), fmt_tok)]
-    keys = sorted(set(stats.by_activity) | set(prev.by_activity),
-                  key=lambda k: -activity_w(stats, k))[:12]
-    rows += [row(activity_name(k), activity_w(stats, k), activity_w(prev, k), fmt_tok) for k in keys]
-    return (f"<h2>{L('Porównanie', 'Comparison')}{qm('compare')}</h2><p class=sub>"
-            f"{E(ctx.label)} vs {E(ctx.prev_label)}</p><div class=wrap><table><tr><th>"
-            f"</th><th class=n>{L('teraz', 'now')}</th><th class=n>{L('wcześniej', 'before')}"
-            f"</th><th class=n>{L('zmiana', 'change')}</th></tr>{''.join(rows)}</table></div>")
+            row(L("tokeny ważone", "weighted tokens"), stats.weighted, prev.weighted, fmt_tok)]
+    if ctx.has("time"):  # the token types
+        rows += [row("\u00a0\u00a0" + type_name(t), stats.weighted_by_type[t],
+                     prev.weighted_by_type[t], fmt_tok)
+                 for t in TOKEN_TYPES if stats.weighted_by_type[t] or prev.weighted_by_type[t]]
+    rows.append(row(L("średnio na wywołanie", "average per call"),
+                    stats.weighted / max(stats.n_calls, 1), prev.weighted / max(prev.n_calls, 1),
+                    fmt_tok))
+    hit_cur, hit_prev = cache_hit(stats.tokens) or 0, cache_hit(prev.tokens) or 0
+    cls = "up" if hit_cur > hit_prev else "down"
+    rows.append(f"<tr><td class=l>{L('trafienia w cache', 'cache hit rate')}</td>"
+                f"<td class=n>{hit_cur:.1f}%</td><td class=n>{hit_prev:.1f}%</td>"
+                f"<td class='n {cls}'>{arrow(hit_cur, hit_prev)} {hit_cur - hit_prev:+.1f}pp</td></tr>")
+    parts = [f"<h2>{L('Porównanie', 'Comparison')}{qm('compare')}</h2><p class=sub>"
+             f"{E(ctx.label)} vs {E(ctx.prev_label)}</p><div class=cmp>", table(rows)]
+    if ctx.has("activities"):
+        parts.append(groups(L("Na co idą tokeny (ważone)", "Where the tokens go (weighted)"),
+                            stats.by_activity, prev.by_activity, activity_name))
+    if ctx.has("models"):
+        parts.append(groups(L("Modele (ważone)", "Models (weighted)"), stats.by_model,
+                            prev.by_model))
+    if ctx.has("breakdown"):
+        parts.append(groups(L("Projekty (ważone)", "Projects (weighted)"), stats.by_project,
+                            prev.by_project))
+    takeaways = diff_takeaways(stats, prev, ctx)
+    if takeaways:
+        items = "".join(f"<li>{E(t)}</li>" for t in takeaways)
+        parts.append(f"<h3>{L('Wnioski', 'Takeaways')}</h3><div class=card><ul>{items}</ul></div>")
+    note = no_comparison_note(ctx.plan.elements)
+    if note:
+        parts.append(f"<p class=sub>{E(note)}</p>")
+    return "".join(parts) + "</div>"
 
 
 def _daily(rows: Optional[List[DayRow]]) -> str:
@@ -351,7 +387,7 @@ def _heaviest_sessions(stats: Stats, ctx: ReportContext) -> str:
     if ctx.session:
         return ""
     total = stats.weighted or 1e-9
-    top = sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.rows + (5 if ctx.full else 0)]
+    top = sorted(stats.by_session.items(), key=lambda kv: -kv[1].weighted)[:ctx.rows + (5 if ctx.plan.long_tables else 0)]
     details = details_for(ctx.calls, ctx.sessions, [k for k, _ in top], ctx.namer)
     rows = ""
     for key, s in top:
@@ -650,17 +686,10 @@ def _project_map(stats: Stats) -> str:
     return "\n".join(parts)
 
 
-_FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache"),
-          ("bash", "--bash"), ("skills", "--skills"), ("map", "--project-map")]
-
-
-def _more(ctx: ReportContext) -> str:
-    missing = [f for key, f in _FLAGS if not ctx.wants(key)]
-    if not missing:
-        return ""
-    flags = " ".join(f"<code>{f}</code>" for f in missing)
-    return (f"<p class=sub>{L('Więcej szczegółów (wygeneruj raport z flagami): ', 'More detail (generate the report with the flags): ')}"
-            f"{flags} {L('albo', 'or')} <code>--full</code> {L('(wszystko).', '(everything).')}</p>")
+def _settings(ctx: ReportContext) -> str:
+    """the footer "Settings of this report" (options.describe_plan), as in the terminal"""
+    lines = "<br>".join(E(line) for line in describe_plan(ctx.plan, ctx.prev_label))
+    return f"<p class=sub>{lines}</p>"
 
 
 def _tips(stats: Stats, ctx: ReportContext) -> str:
@@ -690,21 +719,13 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
     ])
     tooltip = (f"<div id=tip role=tooltip hidden></div>\n<script>\n{_asset('tooltip.js')}"
                f"{_asset('sessions.js')}</script>")
-    if ctx.short:
-        body = [_summary_cards(stats), _single_session(ctx)]
-        if not ctx.session:
-            body += [_activities(stats, TOP_ROWS) if ctx.shows("activities") else "",
-                     _models(stats) if ctx.shows("models") else "",
-                     _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else ""]
-        body.append(f"<p class=sub>{L('To skrócony raport. Domyślny: bez --short, wszystko: --full.', 'This is the short report. The default one: without --short, everything: --full.')}</p>")
-        return "\n".join([head, *body, _footer(), "</main>", tooltip, "</body></html>"])
     optional = [
-        _token_types(stats) + _time_chart(stats) if ctx.wants("time") else "",
-        _breakdowns(stats, ctx) if ctx.wants("breakdown") else "",
-        _context_length(stats) + _cache_and_repeats(stats) if ctx.wants("cache") else "",
-        _bash_noise(stats) if ctx.wants("bash") else "",
-        _skills(stats, ctx) if ctx.wants("skills") else "",
-        _project_map(stats) if ctx.wants("map") else "",
+        _token_types(stats) + _time_chart(stats) if ctx.has("time") else "",
+        _breakdowns(stats, ctx) if ctx.has("breakdown") else "",
+        _context_length(stats) + _cache_and_repeats(stats) if ctx.has("cache") else "",
+        _bash_noise(stats) if ctx.has("bash") else "",
+        _skills(stats, ctx) if ctx.has("skills") else "",
+        _project_map(stats) if ctx.has("map") else "",
     ]
     return "\n".join([
         head,
@@ -713,12 +734,12 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         _explanation(),
         _comparison(stats, prev, ctx),
         _daily(daily),
-        _activities(stats, 20 if ctx.full else 8) if ctx.shows("activities") else "",
-        _models(stats, ctx.rows) if ctx.shows("models") and not ctx.detail else "",
-        _heaviest_sessions(stats, ctx) if ctx.shows("sessions") else "",
+        _activities(stats, 20 if ctx.plan.long_tables else 8) if ctx.has("activities") else "",
+        _models(stats, ctx.rows) if ctx.has("models") and not ctx.detail else "",
+        _heaviest_sessions(stats, ctx) if ctx.has("sessions") else "",
         *optional,
-        _tips(stats, ctx) if ctx.shows("tips") else "",
-        _more(ctx),
+        _tips(stats, ctx) if ctx.has("tips") else "",
+        _settings(ctx),
         _footer(),
         "</main>",
         tooltip,

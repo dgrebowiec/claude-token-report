@@ -31,7 +31,7 @@ UNUSED_SKILLS_MIN, UNUSED_SKILL_SHARE = 5, 0.5  # skills listed / share of them 
 def tips(stats: Stats, ctx: Optional["ReportContext"] = None) -> List[str]:
     """ctx says which sections the report shows: a tip about a hidden one ends with the flag"""
     def hint(section: str, flag: str) -> str:
-        return "" if ctx is None or ctx.wants(section) else L(f" Szczegóły: {flag}.",
+        return "" if ctx is None or ctx.has(section) else L(f" Szczegóły: {flag}.",
                                                               f" Details: {flag}.")
 
     out = []
@@ -74,7 +74,7 @@ def tips(stats: Stats, ctx: Optional["ReportContext"] = None) -> List[str]:
             f"and hand broad searches to a subagent (e.g. \"use a subagent to find…\"). Its "
             f"working reads stay out of the main conversation; only the result comes back."))
 
-    out.extend(_hotspot_tips(stats, compact=ctx is not None and not ctx.wants("map")))
+    out.extend(_hotspot_tips(stats, compact=ctx is not None and not ctx.has("map")))
     out.extend(_waste_tips(stats, total, hint))
 
     rr = stats.rereads

@@ -9,12 +9,13 @@ import urllib.parse
 from typing import List, Optional, Sequence
 
 from . import __version__, configure, i18n, settings as settings_module
-from .context import SECTIONS, ReportContext
+from .context import ReportContext
 from .daily import DayRow, daily_rows, daily_series
 from .explain import explain_text
 from .formatting import fmt_tok
 from .i18n import L
 from .naming import Namer
+from .options import OptionsError, ReportPlan, describe_dry_run, parse_only, resolve
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
@@ -22,6 +23,7 @@ from .report_md import md_report
 from .report_text import session_list, text_daily, text_diff, text_report
 from .session_detail import session_detail
 from .stats import aggregate
+from .waste import find_waste
 from .transcripts import Call, default_root, find_session, load, recent_sessions
 
 
@@ -63,11 +65,21 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s -l pl --from 09-01 --to 09-15 --daily   zakres dat, dzień po dniu\n"
             "  %(prog)s -l pl --today --diff          dzisiaj vs wczoraj\n"
             "  %(prog)s -l pl --list                  ostatnie sesje\n"
-            "  %(prog)s -l pl --short                 skrócony raport\n"
-            "  %(prog)s -l pl --bash --skills         domyślny raport + szum z Bash i skille\n"
-            "  %(prog)s -l pl --full                  wszystkie sekcje\n"
+            "  %(prog)s -l pl --short                 krótki zestaw: czynności, modele, rozmowy\n"
+            "  %(prog)s -l pl --bash --skills         domyślny zestaw + szum z Bash i skille\n"
+            "  %(prog)s -l pl --only models,cache     tylko te elementy (i podsumowanie)\n"
+            "  %(prog)s -l pl --long                  długie tabele, te same elementy\n"
+            "  %(prog)s -l pl --full                  wszystkie elementy, długie tabele\n"
             "  %(prog)s -l pl --session 1a2b3c        szczegóły jednej sesji (id lub prefiks)\n"
-            "  %(prog)s -l pl --html raport.html --daily --private   HTML do udostępnienia\n\n"
+            "  %(prog)s -l pl --html raport.html --daily --private   HTML do udostępnienia\n"
+            "  %(prog)s -l pl --short --diff --dry-run   co pokaże raport, bez czytania transkryptów\n\n"
+            "jak łączą się opcje (okres, zakres, elementy, długość tabel, --diff/--daily):\n"
+            "  1. sprzeczne opcje to błąd, np. --short --full, --session --diff, --list --bash\n"
+            "  2. --short, --full albo --only zastępują zestaw zapisany przez --configure\n"
+            "  3. flaga sekcji (--bash, --cache, ...) dopisuje sekcję do zestawu bazowego\n"
+            "     (zapisanego, presetu albo domyślnego); --no-config pomija zapisany\n"
+            "  4. --diff i --daily działają na tym, co jest w raporcie; nie włączają sekcji\n"
+            "  stopka raportu mówi, skąd wziął się zestaw; sprawdzenie bez liczenia: --dry-run\n\n"
             "daty: RRRR-MM-DD, DD.MM.RRRR, MM-DD (bieżący rok), today, yesterday",
             "examples:\n"
             "  %(prog)s                               last 7 days\n"
@@ -77,12 +89,22 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s --from 09-01 --to 09-15 --daily   a date range, day by day\n"
             "  %(prog)s --today --diff                today vs yesterday\n"
             "  %(prog)s --list                        recent sessions\n"
-            "  %(prog)s --short                       short report\n"
-            "  %(prog)s --bash --skills               default report + Bash noise and skills\n"
-            "  %(prog)s --full                        every section\n"
+            "  %(prog)s --short                       short set: activities, models, conversations\n"
+            "  %(prog)s --bash --skills               default set + Bash noise and skills\n"
+            "  %(prog)s --only models,cache           only these elements (and the summary)\n"
+            "  %(prog)s --long                        long tables, the same elements\n"
+            "  %(prog)s --full                        every element, long tables\n"
             "  %(prog)s --session 1a2b3c              one session in detail (id or prefix)\n"
             "  %(prog)s --html report.html --daily --private   shareable HTML\n"
+            "  %(prog)s --short --diff --dry-run      what the report would show, nothing read\n"
             "  %(prog)s -l pl                         Polish output\n\n"
+            "how the options combine (period, scope, elements, table length, --diff/--daily):\n"
+            "  1. conflicting options are an error, e.g. --short --full, --session --diff, --list --bash\n"
+            "  2. --short, --full or --only replaces the set saved with --configure\n"
+            "  3. a section flag (--bash, --cache, ...) adds its section to the base set\n"
+            "     (the saved one, the preset or the default); --no-config skips the saved one\n"
+            "  4. --diff and --daily work on what is in the report; they turn on no section\n"
+            "  the report footer says where its set came from; check without counting: --dry-run\n\n"
             "dates: YYYY-MM-DD, DD.MM.YYYY, MM-DD (current year), today, yesterday"))
     g = ap.add_argument_group(L("okres (wybierz jeden sposób; domyślnie ostatnie 7 dni)",
                                 "time window (pick one; default: last 7 days)"))
@@ -107,8 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("dzień po dniu: wzrost/spadek każdego dnia względem poprzedniego",
                           "day by day: each day's rise/fall vs the previous day"))
     g.add_argument("--diff", action="store_true",
-                   help=L("porównaj z poprzednim okresem tej samej długości",
-                          "compare with the previous window of the same length"))
+                   help=L("porównaj z poprzednim okresem tej samej długości: liczby ogólne i elementy "
+                          "raportu, które mają porównanie (nie z --all ani --session)",
+                          "compare with the previous window of the same length: the general numbers "
+                          "and the report elements that have a comparison (not with --all or --session)"))
     g = ap.add_argument_group(L("zakres i widok", "scope and view"))
     g.add_argument("--session", "-s", metavar="ID", nargs="?", const="latest",
                    help=L("jedna sesja w szczegółach: modele, effort, ultracode, subagenci, "
@@ -116,15 +140,22 @@ def build_parser() -> argparse.ArgumentParser:
                           "one session in detail: models, effort, ultracode, subagents, files "
                           "(id/prefix; no value = latest)"))
     g.add_argument("--short", action="store_true",
-                   help=L("skrócony raport: główne liczby, czynności, modele i najcięższe rozmowy",
-                          "short report: main numbers, activities, models and heaviest "
-                          "conversations"))
+                   help=L("krótki zestaw: activities, models, sessions (czynności, modele, najcięższe "
+                          "rozmowy); zastępuje zapisany zestaw, flagi sekcji dopisują się",
+                          "short set: activities, models, sessions (activities, models, heaviest "
+                          "conversations); replaces the saved set, section flags add to it"))
+    g.add_argument("--long", action="store_true",
+                   help=L("długie tabele (rankingi po 10 wierszy zamiast 5) bez zmiany elementów",
+                          "long tables (rankings of 10 rows instead of 5) without changing the elements"))
     g.add_argument("--list", metavar="N", nargs="?", type=int, const=15,
-                   help=L("pokaż ostatnie sesje", "list recent sessions"))
-    g = ap.add_argument_group(L("sekcje (domyślnie: podsumowanie, czynności, modele, najcięższe "
-                                "rozmowy i wskazówki)",
-                                "sections (default: summary, activities, models, heaviest "
-                                "conversations and tips)"))
+                   help=L("pokaż ostatnie sesje (osobne polecenie)",
+                          "list recent sessions (a separate command)"))
+    g = ap.add_argument_group(L("elementy (domyślnie: podsumowanie, czynności, modele, najcięższe "
+                                "rozmowy i wskazówki; flaga sekcji dopisuje ją do zestawu z "
+                                "konfiguracji, presetu albo domyślnego)",
+                                "elements (default: summary, activities, models, heaviest "
+                                "conversations and tips; a section flag adds its section to the "
+                                "saved, preset or default set)"))
     g.add_argument("--bash", action="store_true",
                    help=L("szum z poleceń Bash: długie wyniki bez ograniczenia",
                           "Bash noise: long results with no limit"))
@@ -143,31 +174,51 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("podział: sesja główna vs subagenci, typy subagentów, projekty",
                           "breakdown: main session vs subagents, subagent types, projects"))
     g.add_argument("--full", action="store_true",
-                   help=L("wszystkie sekcje i dłuższe tabele", "every section and longer tables"))
+                   help=L("wszystkie elementy i długie tabele; zastępuje zapisany zestaw",
+                          "every element and long tables; replaces the saved set"))
+    g.add_argument("--only", type=parse_only, metavar=L("LISTA", "LIST"),
+                   help=L("tylko te elementy, po przecinku (zastępuje zapisany zestaw; nie z --short "
+                          "ani --full): "
+                          + ",".join(settings_module.ELEMENTS),
+                          "only these elements, comma-separated (replaces the saved set; not with "
+                          "--short or --full): "
+                          + ",".join(settings_module.ELEMENTS)))
     g = ap.add_argument_group(L("wyjście", "output"))
     g.add_argument("--html", metavar=L("PLIK", "FILE"), help=L("zapisz raport HTML", "write an HTML report"))
     g.add_argument("--md", metavar=L("PLIK", "FILE"),
-                   help=L("zapisz raport jako Markdown do analizy przez Claude'a (domyślnie z pełnym "
-                          "szczegółem)",
-                          "write the report as Markdown for Claude to analyze (full detail by default)"))
+                   help=L("zapisz raport jako Markdown do analizy przez Claude'a (bez presetu, --only, "
+                          "flag sekcji i zapisanego zestawu: wszystkie elementy, długie tabele)",
+                          "write the report as Markdown for Claude to analyze (with no preset, --only, "
+                          "section flag or saved set: every element, long tables)"))
+    g.add_argument("--dry-run", action="store_true",
+                   help=L("pokaż, co zawierałby raport (okres, elementy i skąd są, tabele, "
+                          "porównanie, wyjście), bez czytania transkryptów i zapisu plików",
+                          "show what the report would contain (period, elements and where they "
+                          "come from, tables, comparison, output) without reading the transcripts "
+                          "or writing files"))
     g.add_argument("--private", action="store_true",
                    help=L("ukryj nazwy projektów, plików i treść próśb (do udostępniania)",
                           "hide project/file names and prompt text (for sharing)"))
     g.add_argument("--configure", action="store_true",
-                   help=L("interaktywnie wybierz poziom szczegółowości (minimal / normal / "
-                          "detailed) i elementy raportu; zapisane ustawienia działają, gdy nie "
-                          "podasz flag sekcji",
-                          "interactively pick the detail level (minimal / normal / detailed) and "
-                          "the report elements; the saved choice applies when you pass no "
-                          "section flags"))
+                   help=L("interaktywnie wybierz elementy raportu i długość tabel (compact / "
+                          "long), z podsumowaniem przed zapisem; flagi sekcji dopisują się do "
+                          "zapisanego zestawu (osobne polecenie)",
+                          "interactively pick the report elements and the table length (compact / "
+                          "long), with a summary before saving; section flags add to the saved set "
+                          "(a separate command)"))
     g.add_argument("--reset-config", action="store_true",
-                   help=L("przywróć domyślne ustawienia raportu (usuwa plik konfiguracji)",
-                          "reset report configuration to defaults (removes configuration file)"))
+                   help=L("przywróć domyślne ustawienia raportu (usuwa plik konfiguracji; osobne "
+                          "polecenie)",
+                          "reset report configuration to defaults (removes configuration file; a "
+                          "separate command)"))
     g.add_argument("--no-config", action="store_true",
-                   help=L("zignoruj zapisane ustawienia (--configure) w tym uruchomieniu",
-                          "ignore the saved settings (--configure) for this run"))
+                   help=L("zignoruj zapisany zestaw (--configure) w tym uruchomieniu; bazą jest "
+                          "zestaw domyślny",
+                          "ignore the saved set (--configure) for this run; the base is the default "
+                          "set"))
     g.add_argument("--explain", action="store_true",
-                   help=L("wyjaśnij tokeny surowe i ważone", "explain raw and weighted tokens"))
+                   help=L("wyjaśnij tokeny surowe i ważone (osobne polecenie)",
+                          "explain raw and weighted tokens (a separate command)"))
     g.add_argument("--color", dest="color", action="store_true", default=None,
                    help=L("wymuś kolory w terminalu (np. dla less -R)",
                           "force terminal colors (e.g. for less -R)"))
@@ -212,12 +263,6 @@ def _daily_rows(window: Window, calls: List[Call], current: List[Call]) -> List[
     return daily_rows(daily_series(calls, series_from, last), has_base)
 
 
-def _saved_settings(args: argparse.Namespace) -> Optional[settings_module.Settings]:
-    """the settings saved by --configure, unless this run picks its own sections"""
-    own = args.short or args.full or any(getattr(args, k) for k in SECTIONS)
-    return None if own or args.no_config else settings_module.load()
-
-
 def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
@@ -229,11 +274,39 @@ def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
     print(L("otwórz: ", "open: ") + link)
 
 
+def _window(ap: argparse.ArgumentParser, args: argparse.Namespace) -> Window:
+    try:
+        window = resolve_window(args)
+    except ValueError as e:
+        ap.error(str(e))
+    if args.session and not picked_options(args):
+        window.start, window.first = None, None  # a session report covers the whole session
+    return window
+
+
+def _dry_run(args: argparse.Namespace, plan: ReportPlan, window: Window, root: str) -> None:
+    """--dry-run: the plan of the report; neither the transcripts nor their directory are read"""
+    if args.session and window.start is None:
+        period = L("cała sesja", "the whole session")
+    else:
+        period = period_label(window.start, window.end, window.last_n, window.rolling)
+    prev_start = previous_window_start(window) if args.diff else None
+    prev_label = period_label(prev_start, window.start) if prev_start is not None else ""
+    print("\n".join(describe_dry_run(
+        plan, period, prev_label, session=args.session, html=args.html, md=args.md,
+        private=args.private, root=root.replace(os.path.expanduser("~"), "~", 1))))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     argv = sys.argv[1:] if argv is None else list(argv)
     i18n.set_lang(i18n.detect_lang(argv))  # an invalid value is reported by argparse below
     ap = build_parser()
     args = ap.parse_args(argv)
+    saved = None if args.no_config else settings_module.load()
+    try:
+        plan = resolve(args, saved)  # before the separate commands: they take no report options
+    except OptionsError as e:
+        ap.error(str(e))
 
     color = _use_color(args.color)
     if args.explain:
@@ -253,6 +326,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "settings are already default (no saved configuration file)"))
         return
     root = args.dir or default_root()
+    if args.dry_run:
+        _dry_run(args, plan, _window(ap, args), root)
+        return
     if not os.path.isdir(root):
         sys.exit(L(f"brak katalogu {root} — czy Claude Code był tu używany? (--dir)",
                    f"no directory {root} — has Claude Code been used here? (--dir)"))
@@ -271,12 +347,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         session_key, files = found
         session_label = session_key[1][:8]
 
-    try:
-        window = resolve_window(args)
-    except ValueError as e:
-        ap.error(str(e))
-    if args.session and not picked_options(args):
-        window.start, window.first = None, None  # a session report covers the whole session
+    window = _window(ap, args)
     start, end = window.start, window.end
 
     prev_start = previous_window_start(window) if args.diff else None
@@ -290,25 +361,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         label += "  (" + namer.project(sessions.get(session_key), session_key[0]) + ")"
     ctx = ReportContext(label=label, root_display=root.replace(os.path.expanduser("~"), "~", 1),
                         sessions=sessions, namer=namer,
-                        calls=current, session=args.session, session_key=session_key,
-                        short=args.short, full=args.full,
-                        sections=frozenset(k for k in SECTIONS if getattr(args, k)))
-    saved = _saved_settings(args)
-    if saved:
-        shown = saved.shown()
-        ctx.short, ctx.full = saved.level == "minimal", saved.level == "detailed"
-        ctx.only_chosen = True
-        ctx.sections = frozenset(k for k in SECTIONS if k in shown)
-        ctx.core = frozenset(k for k in settings_module.CORE if k in shown)
-    if args.md and not (saved or ctx.short or ctx.sections):
-        ctx.full = True  # an analysis wants all the data
+                        calls=current, session=args.session, session_key=session_key, plan=plan)
     if session_key:
         ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)
     prev_stats = None
     if prev_start is not None:
-        prev_stats = aggregate([c for c in calls if prev_start <= c.time < start], sessions, namer,
-                               hotspots=False)
+        prev_calls = [c for c in calls if prev_start <= c.time < start]
+        prev_stats = aggregate(prev_calls, sessions, namer, hotspots=False)
+        if plan.has("bash"):  # --diff compares the share of Bash noise
+            prev_stats.waste = find_waste(prev_calls, sessions)
         ctx.prev_label = period_label(prev_start, start)
     daily = _daily_rows(window, calls, current) if args.daily else None
 

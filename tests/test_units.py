@@ -112,10 +112,10 @@ class FormattingTest(unittest.TestCase):
         self.assertEqual(short_right("some-long-name", 10), "some-long…")
 
     def test_bar(self):
-        self.assertEqual(bar(0.0, 4), "····")
-        self.assertEqual(bar(0.02, 4), "▌···")
-        self.assertEqual(bar(0.5, 4), "██··")
-        self.assertEqual(bar(1.0, 4), "████")
+        self.assertEqual(bar(0.0, 4), "▯▯▯▯")
+        self.assertEqual(bar(0.02, 4), "▮▯▯▯")
+        self.assertEqual(bar(0.5, 4), "▮▮▯▯")
+        self.assertEqual(bar(1.0, 4), "▮▮▮▮")
 
 
 def _args(**kw):

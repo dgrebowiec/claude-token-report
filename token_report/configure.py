@@ -1,4 +1,4 @@
-"""Interactive configurator: detail level and which elements the report contains.
+"""Interactive configurator: table length (compact / long) and which elements the report contains.
 
 In a terminal it is a full-screen editor driven by keys (arrows, space, enter). When stdin is
 not a terminal (pipes, tests) it falls back to one text command per line.
@@ -15,8 +15,8 @@ from typing import Callable, List, Optional
 
 from . import settings as settings_module
 from .i18n import L
-from .settings import (DEFAULT_ELEMENTS, ELEMENTS, LEVELS, MINIMAL_ELEMENTS, Settings,
-                        describe, describe_level)
+from .options import ELEMENT_INFO, uncompared, warnings_for
+from .settings import DEFAULT_ELEMENTS, ELEMENTS, LEVELS, Settings, describe, describe_level
 
 REVERSE = "\033[7m"
 BOLD = "\033[1m"
@@ -37,24 +37,81 @@ def strip_ansi(text: str) -> str:
 
 def key_help() -> str:
     return L(
-        "↑↓ wybór   SPACJA włącz/wyłącz   ←→ poziom   a wszystko   n nic   r/d domyślne   ENTER zapisz   q wyjście",
-        "↑↓ select   SPACE toggle   ←→ level   a all   n none   r/d defaults   ENTER save   q quit"
+        "↑↓ wybór   SPACJA włącz/wyłącz   ←→ długość tabel   a wszystko   n nic   r/d domyślne   "
+        "s podsumowanie   ENTER zapisz (po podsumowaniu)   q wyjście",
+        "↑↓ select   SPACE toggle   ←→ table length   a all   n none   r/d defaults   "
+        "s summary   ENTER save (after the summary)   q quit"
     )
 
 
 def line_help() -> str:
     return L("""polecenia:
-  <n>     włącz lub wyłącz element n    l       zmień poziom szczegółowości
+  <n>     włącz lub wyłącz element n    l       zmień długość tabel (compact / long)
   a       wszystkie elementy            n       żaden (zostaje pierwszy)
-  r / d   przywróć domyślne             w       zapisz i wyjdź          q   wyjdź bez zapisu""",
+  r / d   przywróć domyślne             s       podsumowanie (bez zapisu)
+  w       podsumowanie, potem zapis po potwierdzeniu (t)                q   wyjdź bez zapisu""",
              """commands:
-  <n>     toggle element n              l       cycle detail level
+  <n>     toggle element n              l       switch table length (compact / long)
   a       all elements                  n       none (the first one stays)
-  r / d   restore defaults              w       save and exit           q   quit without saving""")
+  r / d   restore defaults              s       summary (nothing saved)
+  w       summary, then save once confirmed (y)                         q   quit without saving""")
+
+
+SUMMARY_KEYS_HELP = ("ENTER/w zapisz   inny klawisz: wróć do edycji",
+                     "ENTER/w save   any other key: back to editing")
+CONFIRM = ("t", "tak", "y", "yes", "w")  # answers that confirm saving in the line-based editor
+
+
+def summary_lines(settings: Settings, color: bool = True) -> List[str]:
+    """The summary screen: every element with its state, what long tables and --diff do for it,
+    and the warnings (options.warnings_for) about settings that would have no effect."""
+    b, d, g, y, bc, rst = ((BOLD, DIM, GREEN, YELLOW, BOLD_CYAN, RESET) if color
+                           else ("", "", "", "", "", ""))
+    yes, na = L("tak", "yes"), L("nie dotyczy", "n/a")
+    compared, not_compared = L("porównanie", "compared"), L("bez porównania", "not compared")
+    summary = L("podsumowanie", "summary")
+    width = max(len(summary), *(len(e) for e in ELEMENTS)) + 2
+    col = max(len(L("długie tabele", "long tables")), len(yes), len(na)) + 3
+
+    def row(mark: str, name: str, tables: str, diff: str, note: str = "") -> str:
+        return f"   {mark} {name:<{width}}{tables:<{col}}{diff}{note}"
+
+    lines = [f" {bc}{L('PODSUMOWANIE USTAWIEŃ', 'SETTINGS SUMMARY')}{rst}", "",
+             f" {b}{L('Długość tabel', 'Table length')}{rst}: {b}{settings.level}{rst}  {d}"
+             + (L("rankingi po 10 wierszy (czynności po 16)", "rankings of 10 rows (activities 16)")
+                if settings.level == "long" else
+                L("rankingi po 5 wierszy (czynności po 8)", "rankings of 5 rows (activities 8)"))
+             + rst, "",
+             f"{b}" + row(" ", "element", L("długie tabele", "long tables"), "--diff") + rst,
+             f"{g}" + row("✓", summary, na, compared, L("  (zawsze w raporcie)", "  (always in the report)")) + rst]
+    chosen = settings.shown()
+    for e in ELEMENTS:
+        info = ELEMENT_INFO[e]
+        line = row("✓" if e in chosen else "·", e, yes if info.has_tables else na,
+                   not_compared if uncompared((e,)) else compared)
+        lines.append(f"{g}{line}{rst}" if e in chosen else f"{d}{line}{rst}")
+    lines += ["", f" {d}✓ {L('włączony', 'on')}   · {L('wyłączony', 'off')}   "
+                  + L("długie tabele: czy long wydłuża tabele elementu",
+                      "long tables: whether long makes the tables of the element longer") + rst,
+              f" {d}--diff: " + L("czy porównanie z poprzednim okresem ma dla niego część",
+                                  "whether the comparison with the previous window has a part for it")
+              + rst, ""]
+    warnings = warnings_for(settings)
+    lines += [f" {y}⚠ {w}{rst}" for w in warnings] or [
+        f" {g}✓ {L('każde ustawienie ma skutek', 'every setting has an effect')}{rst}"]
+    return lines
 
 
 def section_preview(element: str, level: str, width: int = 86, color: bool = True) -> List[str]:
-    """Generates a rich, realistic terminal preview of the given element taking language and level into account."""
+    """A realistic terminal preview of the element for the table length (compact / long)."""
+    lines = _preview(element, level, width, color)
+    if level == "long" and not ELEMENT_INFO[element].has_tables:
+        d, rst = (DIM, RESET) if color else ("", "")
+        lines.append(f" {d}│ {L('długie tabele nie zmieniają tej sekcji (stała długość)', 'long tables do not change this section (fixed length)')}{rst}")
+    return lines
+
+
+def _preview(element: str, level: str, width: int, color: bool) -> List[str]:
     b = BOLD if color else ""
     d = DIM if color else ""
     c = CYAN if color else ""
@@ -66,47 +123,39 @@ def section_preview(element: str, level: str, width: int = 86, color: bool = Tru
 
     col_rule = f"{d}{'─' * min(width - 6, 76)}{rst}"
 
-    if level == "minimal" and element not in MINIMAL_ELEMENTS:
-        return [
-            f" {bc}── {element.upper()} ──{rst}",
-            f" {y}{L(' [!] Ta sekcja jest pomijana na poziomie minimal.', ' [!] This section is omitted at minimal level.')}{rst}",
-            f" {d}{L('     (zmień poziom na normal lub detailed za pomocą ← →, aby ją włączyć)', '     (change level to normal or detailed using ← → to enable it)')}{rst}",
-        ]
-
     if element == "activities":
-        limit_note = (L("tryb skrócony: do 8 głównych czynności", "short mode: up to 8 top activities") if level == "minimal"
-                      else L("domyślnie: do 8 wierszy + (pozostałe)", "default: up to 8 rows + (other)") if level == "normal"
-                      else L("pełna lista: do 16 wierszy + podział narzędzi", "full list: up to 16 rows + tool split"))
+        limit_note = (L("compact: do 8 wierszy + (pozostałe)", "compact: up to 8 rows + (other)") if level == "compact"
+                      else L("long: do 16 wierszy (w HTML do 20)", "long: up to 16 rows (20 in HTML)"))
         lines = [
             f" {bc}── {L('NA CO IDĄ TOKENY', 'WHERE THE TOKENS GO')} ──{rst}",
             f" {b}{L('czynność', 'activity'):<30}{L('surowe', 'raw'):>8}{L('ważone', 'weighted'):>9}{'%':>6}{L('użyć', 'uses'):>7}{L('śr./szt.', 'avg'):>9}{rst}",
             f" {col_rule}",
-            f" Bash: searching (grep/find/ls)   82.7M   {b}10.4M{rst} 22.4%    903     12k  {c}████{d}············{rst}",
-            f" Bash: scripts (python/node/own)  61.1M   {b} 6.3M{rst} 13.5%    459     14k  {c}███{d}·············{rst}",
-            f" Edit/Write — changing files      29.9M   {b} 4.5M{rst}  9.8%    646      7k  {c}██{d}··············{rst}",
+            f" Bash: searching (grep/find/ls)   82.7M   {b}10.4M{rst} 22.4%    903     12k  {d}│{rst}{c}▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" Bash: scripts (python/node/own)  61.1M   {b} 6.3M{rst} 13.5%    459     14k  {d}│{rst}{c}▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" Edit/Write — changing files      29.9M   {b} 4.5M{rst}  9.8%    646      7k  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
         ]
-        if level == "detailed":
-            lines.append(f" Read — reading files             39.2M   {b} 3.7M{rst}  8.0%    878      4k  {c}██{d}··············{rst}")
+        if level == "long":
+            lines.append(f" Read — reading files             39.2M   {b} 3.7M{rst}  8.0%    878      4k  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}")
         lines.append(f" {d}│ {limit_note}{rst}")
         return lines
 
     if element == "models":
-        limit_note = (L("do 5 modeli", "up to 5 models") if level in ("minimal", "normal")
-                      else L("do 10 modeli w pełnym zestawieniu tokenów", "up to 10 models with full token breakdown"))
+        limit_note = (L("compact: do 5 modeli", "compact: up to 5 models") if level == "compact"
+                      else L("long: do 10 modeli", "long: up to 10 models"))
         lines = [
             f" {bc}── {L('MODELE', 'MODELS')} ──{rst}",
             f" {b}{'model':<22}{L('surowe', 'raw'):>8}{L('ważone', 'weighted'):>9}{'%':>6}{L('wywoł.', 'calls'):>7}{L('waga', 'weight'):>7}{rst}",
             f" {col_rule}",
-            f" claude-opus-5-5       327.9M   {b}40.1M{rst} 86.3%   2501   x0.8  {c}███████████{d}··{rst}",
-            f" claude-sonnet-5-5      78.7M   {b} 6.3M{rst} 13.5%    912   x0.4  {c}██{d}···········{rst}",
+            f" claude-opus-5-5       327.9M   {b}40.1M{rst} 86.3%   2501   x0.8  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮▮{d}▯▯{rst}",
+            f" claude-sonnet-5-5      78.7M   {b} 6.3M{rst} 13.5%    912   x0.4  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯{rst}",
             f" claude-haiku-5-5       10.6M   {b} 126k{rst}  0.3%    109  x0.02  {d}·············{rst}",
         ]
         lines.append(f" {d}│ {limit_note}{rst}")
         return lines
 
     if element == "sessions":
-        limit_note = (L("5 najcięższych sesji", "5 heaviest sessions") if level in ("minimal", "normal")
-                      else L("10 najcięższych sesji z pełnym podziałem", "10 heaviest sessions in full detail"))
+        limit_note = (L("compact: 5 najcięższych sesji", "compact: 5 heaviest sessions") if level == "compact"
+                      else L("long: 10 najcięższych sesji (w HTML 15)", "long: 10 heaviest sessions (15 in HTML)"))
         topic_a = L("orkiestruj plan...", "orchestrate plan...")
         topic_b = L("napraw błąd logowania...", "fix login bug...")
         lines = [
@@ -130,39 +179,33 @@ def section_preview(element: str, level: str, width: int = 86, color: bool = Tru
         ]
 
     if element == "time":
-        extra = (L(" + trend 6 głównych czynności w czasie", " + trend of top 6 activities over time")
-                 if level == "detailed" else "")
         return [
             f" {bc}── {L('RODZAJE TOKENÓW — surowe vs ważone', 'TOKEN TYPES — raw vs weighted')} ──{rst}",
-            f" cache read             391.4M   {b}13.9M{rst} 29.9%  {c}████████{d}··················{rst}",
-            f" cache write 5 min       16.6M   {b}13.8M{rst} 29.8%  {c}████████{d}··················{rst}",
-            f" output (response)        3.0M   {b}10.3M{rst} 22.1%  {c}██████{d}····················{rst}",
-            f" {d}│ {L('rozbicie kosztów cache vs wyjście oraz rozkład dzienny/tygodniowy', 'cache vs output breakdown and daily/weekly distribution')}{extra}{rst}",
+            f" cache read             391.4M   {b}13.9M{rst} 29.9%  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" cache write 5 min       16.6M   {b}13.8M{rst} 29.8%  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" output (response)        3.0M   {b}10.3M{rst} 22.1%  {d}│{rst}{c}▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" {d}│ {L('rozbicie kosztów cache vs wyjście, rozkład dzienny/tygodniowy i trend głównych czynności', 'cache vs output breakdown, daily/weekly distribution and the trend of top activities')}{rst}",
         ]
 
     if element == "breakdown":
-        extra = (L(" + tabela subagentów wg typu z rozmiarem kontekstu", " + subagents table by type with context size")
-                 if level == "detailed" else "")
         return [
             f" {bc}── {L('SESJA GŁÓWNA vs SUBAGENCI & PROJEKTY', 'MAIN vs SUBAGENTS & PROJECTS')} ──{rst}",
-            f" " + L("subagenci", "subagents") + f"             246.2M   {b}28.8M{rst} 61.9%    2086  {c}████████████{d}········{rst}",
-            f" " + L("sesja główna", "main session") + f"          171.0M   {b}17.7M{rst} 38.1%    1436  {c}████████{d}············{rst}",
-            f" AISudokuAndroid        201.3M   {b}24.4M{rst} 52.4%    1891  {c}██████████{d}··········{rst}",
-            f" {d}│ {L('udział subagentów oraz podział zużycia wg projektów', 'subagents share and usage split across projects')}{extra}{rst}",
+            f" " + L("subagenci", "subagents") + f"             246.2M   {b}28.8M{rst} 61.9%    2086  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯{rst}",
+            f" " + L("sesja główna", "main session") + f"          171.0M   {b}17.7M{rst} 38.1%    1436  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" AISudokuAndroid        201.3M   {b}24.4M{rst} 52.4%    1891  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" {d}│ {L('udział subagentów, subagenci wg typu i podział zużycia wg projektów', 'subagents share, subagents by type and usage split across projects')}{rst}",
         ]
 
     if element == "cache":
-        extra = (L(" + pojedyncze zdarzenia wygaśnięcia cache i sesje", " + single cache rewrite events and sessions")
-                 if level == "detailed" else "")
         calls_word = L("wyw.", "calls")
         wt_word = L("ważonych", "weighted")
         extra_word = L("nadmiaru", "extra")
         gap_word = L("przerwa", "pause")
         return [
             f" {bc}── {L('DŁUGOŚĆ ROZMOWY & WYGASŁY CACHE', 'CONVERSATION LENGTH & EXPIRED CACHE')} ──{rst}",
-            f" 100-200k               1546 {calls_word}  {b}23.4M{rst} {wt_word} (50.4%)  {c}█████████{d}·········{rst}",
+            f" 100-200k               1546 {calls_word}  {b}23.4M{rst} {wt_word} (50.4%)  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯{rst}",
             f" " + L("wygasły cache", "expired cache") + f"          104 {calls_word}   {b}11.2M{rst} {extra_word}  ({gap_word} > 60 min: 34×)",
-            f" {d}│ {L('analiza kosztów długich rozmów, odbudowy cache i powtórnych odczytów', 'cost analysis of long context, cache rewrites and repeated reads')}{extra}{rst}",
+            f" {d}│ {L('koszt długich rozmów, zapisów cache od nowa (sesje, zdarzenia) i powtórnych odczytów', 'cost of long context, cache rewrites (sessions, events) and repeated reads')}{rst}",
         ]
 
     if element == "bash":
@@ -188,6 +231,7 @@ def section_preview(element: str, level: str, width: int = 86, color: bool = Tru
             f" {b}kotlin-android{rst}            11 {convs_word}     {d}({used_tag}){rst}",
             f" {b}run{rst}                       92 {tok_word}     {y}{named_word}{rst} {d}({unused_tag}){rst}",
             f" {d}│ {L('pokazuje, które skille są używane, a które tylko zajmują kontekst', 'shows which skills are used and which only take up context')}{rst}",
+            f" {d}│ {L('compact: do 5 wierszy na listę', 'compact: up to 5 rows per list') if level == 'compact' else L('long: do 10 wierszy na listę', 'long: up to 10 rows per list')}{rst}",
         ]
 
     if element == "map":
@@ -239,6 +283,7 @@ class Editor:
         self.dirty = False
         self.message = ""
         self._quit_armed = False
+        self.summary_open = False  # the summary screen (s, or ENTER / w before saving)
 
     # --- operations ---
 
@@ -285,8 +330,16 @@ class Editor:
     # --- input ---
 
     def handle_key(self, key: str) -> Optional[str]:
-        """One key of the full-screen editor. Returns 'save', 'quit' or None."""
+        """One key of the full-screen editor. Returns 'save', 'quit' or None. ENTER / w open the
+        summary first; ENTER / w there saves, any other key goes back to editing."""
         self.message = ""
+        if self.summary_open:
+            if key in ("enter", "w"):
+                return "save"
+            if key == "ctrl-c":
+                return "quit"
+            self.summary_open = False
+            return None
         if key in ("q", "esc", "ctrl-c"):
             if self.dirty and not self._quit_armed and key != "ctrl-c":
                 self._quit_armed = True
@@ -295,8 +348,9 @@ class Editor:
                 return None
             return "quit"
         self._quit_armed = False
-        if key in ("enter", "w"):
-            return "save"
+        if key in ("enter", "w", "s"):
+            self.summary_open = True
+            return None
         actions = {
             "up": lambda: self.move_cursor(-1), "k": lambda: self.move_cursor(-1),
             "down": lambda: self.move_cursor(1), "j": lambda: self.move_cursor(1),
@@ -317,10 +371,15 @@ class Editor:
         return None
 
     def handle_line(self, command: str) -> Optional[str]:
-        """One text command of the line-based editor. Returns 'save', 'quit' or None."""
+        """One text command of the line-based editor. Returns 'confirm' (w: the summary, then
+        save once confirmed), 'summary' (s), 'quit' or None."""
         self.message = ""
         if command == "w":
-            return "save"
+            return "confirm"
+        if command == "s":
+            return "summary"
+        if command == "":
+            return None  # just show the editor again
         if command == "q":
             return "quit"
         if command == "l":
@@ -349,23 +408,17 @@ class Editor:
         tags = [f"{CYAN}[{L('podsumowanie', 'summary')}]{RESET}"]
         for e in shown:
             tags.append(f"{BOLD}[{e}]{RESET}")
-        lines = ["  " + " · ".join(tags)]
-        if self.settings.level == "minimal":
-            hidden = [e for e in self.settings.elements if e not in MINIMAL_ELEMENTS]
-            if hidden:
-                lines.append("  " + DIM + L("pominięte na poziomie minimal: ", "left out at minimal level: ")
-                             + ", ".join(hidden) + RESET)
-        return lines
+        return ["  " + " · ".join(tags)]
 
     def rows(self, width: int) -> List[str]:
         lines = []
-        minimal = self.settings.level == "minimal"
+        long_tables = self.settings.level == "long"
         for index, name in enumerate(ELEMENTS):
             is_active = index == self.cursor
             is_on = name in self.settings.elements
             note = ""
-            if minimal and name not in MINIMAL_ELEMENTS:
-                note = f" {DIM}" + L("(brak w minimal)", "(omitted in minimal)") + RESET
+            if long_tables and is_on and not ELEMENT_INFO[name].has_tables:
+                note = f" {DIM}" + L("(long nic tu nie zmienia)", "(long changes nothing here)") + RESET
 
             mark = f"{GREEN}[✓]{RESET}" if is_on else f"{DIM}[ ]{RESET}"
             num = f"{DIM}{index + 1:>2}.{RESET}"
@@ -383,7 +436,15 @@ class Editor:
             lines.append(row)
         return lines
 
+    def summary_screen(self) -> List[str]:
+        title = f" {BOLD_CYAN}⚙  CLAUDE CODE TOKEN REPORT — {L('KONFIGURACJA', 'CONFIGURATION')}{RESET}"
+        if self.dirty:
+            title += f"  {YELLOW}({L('niezapisane zmiany', 'unsaved changes')}){RESET}"
+        return [title, "", *summary_lines(self.settings), "", f" {DIM}{L(*SUMMARY_KEYS_HELP)}{RESET}"]
+
     def screen(self, width: int, height: int = 34) -> List[str]:
+        if self.summary_open:
+            return self.summary_screen()
         s = self.settings
         title = f" {BOLD_CYAN}⚙  CLAUDE CODE TOKEN REPORT — {L('KONFIGURACJA', 'CONFIGURATION')}{RESET}"
         if self.dirty:
@@ -401,7 +462,7 @@ class Editor:
                 level_pills.append(f"{DIM}[ {lvl} ]{RESET}")
         pills_str = "   ".join(level_pills)
 
-        level_hdr = f" {BOLD}{L('Poziom szczegółowości', 'Detail level')}{RESET}:  {pills_str}   {DIM}(← →){RESET}"
+        level_hdr = f" {BOLD}{L('Długość tabel', 'Table length')}{RESET}:  {pills_str}   {DIM}(← →){RESET}"
         level_desc = f"    {DIM}{describe_level(s.level)}{RESET}"
 
         top_lines = [
@@ -524,7 +585,7 @@ def run_tui(path: Optional[Path] = None) -> Optional[Path]:
 
 def show(editor: Editor, out: Callable[[str], None]) -> None:
     out("")
-    out(L("poziom: ", "level: ") + f"{editor.settings.level}  ({describe_level(editor.settings.level)})")
+    out(L("długość tabel: ", "table length: ") + f"{editor.settings.level}  ({describe_level(editor.settings.level)})")
     out("")
     for row in editor.rows(78):
         out(strip_ansi(row).rstrip())
@@ -547,8 +608,11 @@ def run(path: Optional[Path] = None, ask: Callable[[str], str] = input,
     """Line-based editor. Returns the path it saved to, or None when the user quit."""
     path = path or settings_module.settings_path()
     editor = Editor(copy.deepcopy(settings_module.load(path) or Settings()))
+    redraw = True
     while True:
-        show(editor, out)
+        if redraw:
+            show(editor, out)
+        redraw = True
         try:
             command = ask("> ").strip()
         except EOFError:
@@ -556,6 +620,25 @@ def run(path: Optional[Path] = None, ask: Callable[[str], str] = input,
         result = editor.handle_line(command)
         if editor.message:
             out(editor.message)
+        if result in ("summary", "confirm"):
+            out("")
+            for line in summary_lines(editor.settings, color=False):
+                out(line.rstrip())
+            out("")
+        if result == "summary":
+            out(L("w = zapisz, Enter = ekran edycji", "w = save, Enter = the editor"))
+            redraw = False
+            continue
+        if result == "confirm":
+            try:
+                answer = ask(L("zapisać? t = tak, inne = wróć do edycji > ",
+                               "save? y = yes, anything else = back to editing > ")).strip().lower()
+            except EOFError:
+                answer = ""
+            if answer in CONFIRM:
+                result = "save"
+            else:
+                out(L("nie zapisano — wracasz do edycji", "not saved — back to editing"))
         if result == "save":
             saved = settings_module.save(editor.settings, path)
             out(L(f"zapisano {saved}", f"saved to {saved}"))

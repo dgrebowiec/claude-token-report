@@ -2,15 +2,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from .naming import Namer
 from .session_detail import SessionDetail
 from .transcripts import Call, SessionKey, SessionMeta
 
-TOP_ROWS = 10  # rows in the ranking tables (--full)
-CORE_ROWS = 5  # rows in the default report
+if TYPE_CHECKING:
+    from .options import ReportPlan
+
+TOP_ROWS = 10  # rows in the ranking tables with long tables (--long, --full)
+CORE_ROWS = 5  # rows in the ranking tables with compact tables (the default)
 SECTIONS = ("time", "breakdown", "cache", "bash", "skills", "map")  # the optional sections
+
+
+def _default_plan() -> "ReportPlan":
+    """the default report: core elements, compact tables (options imports this module)"""
+    from .options import DEFAULT, ReportPlan
+    return ReportPlan(elements=DEFAULT, origin={e: "default" for e in DEFAULT})
 
 
 @dataclass
@@ -24,19 +33,12 @@ class ReportContext:
     session_key: Optional[SessionKey] = None
     prev_label: str = ""  # the period compared with (--diff)
     detail: Optional[SessionDetail] = None  # of the --session session
-    short: bool = False  # --short: the main numbers and the heaviest conversations only
-    sections: FrozenSet[str] = frozenset()  # optional sections asked for (--bash, --cache ...)
-    full: bool = False  # --full: every section, long tables
-    only_chosen: bool = False  # saved settings: long tables (full) but only the chosen sections
-    core: Optional[FrozenSet[str]] = None  # saved settings: core elements to show; None = all
+    plan: "ReportPlan" = field(default_factory=_default_plan)  # options.resolve
 
-    def wants(self, section: str) -> bool:
-        return (self.full and not self.only_chosen) or section in self.sections
-
-    def shows(self, element: str) -> bool:
-        """a core element (activities, models, sessions, tips) the report includes"""
-        return self.core is None or element in self.core
+    def has(self, element: str) -> bool:
+        """the report includes this element (a core one or an optional section)"""
+        return self.plan.has(element)
 
     @property
     def rows(self) -> int:
-        return TOP_ROWS if self.full else CORE_ROWS
+        return TOP_ROWS if self.plan.long_tables else CORE_ROWS
