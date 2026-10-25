@@ -8,7 +8,8 @@ from unittest import mock
 
 from token_report import i18n
 from token_report.cli import build_parser, main
-from token_report.options import ELEMENT_INFO, OptionsError, resolve
+from token_report.options import (ELEMENT_INFO, OptionsError, no_comparison_note, resolve,
+                                  uncompared)
 from token_report.settings import CORE, ELEMENTS, Settings, describe_level, from_dict
 
 
@@ -83,6 +84,8 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(set(ELEMENT_INFO), set(ELEMENTS))
         self.assertEqual([e for e in ELEMENTS if ELEMENT_INFO[e].has_tables],
                          ["activities", "models", "sessions", "skills"])
+        self.assertEqual([e for e in ELEMENTS if ELEMENT_INFO[e].comparable],
+                         ["activities", "models", "time", "breakdown", "cache", "bash"])
         self.assertIn("bash", describe_level("long"))
         self.assertNotIn("models", describe_level("long"))
         self.assertIn("5", describe_level("compact"))
@@ -153,6 +156,16 @@ class MigrationTest(unittest.TestCase):
         self.assertTrue(p.session and p.daily)
         self.assertTrue(p.has("activities"))
         self.assertFalse(p.has("bash"))
+
+    def test_diff_notes_the_elements_without_comparison(self):
+        self.assertEqual(plan("--skills").notes, ())  # no --diff: nothing to note
+        p = plan("--skills", "--diff")
+        self.assertEqual(uncompared(p.elements), ("sessions", "tips", "skills"))
+        self.assertEqual(len(p.notes), 1)
+        self.assertTrue(p.notes[0].endswith(": sessions, tips, skills"))
+        self.assertEqual(plan("--only", "activities,models,cache", "--diff").notes, ())
+        self.assertTrue(plan("--only", "activities,map", "--diff").notes[0].endswith(": map"))
+        self.assertEqual(no_comparison_note(("activities", "bash")), "")
 
     def assertError(self, *argv, words=()):
         with self.assertRaises(OptionsError) as cm:

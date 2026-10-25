@@ -39,20 +39,34 @@ class ElementInfo:
     comparable: bool  # --diff has a comparison for it
 
 
-# read from the renderers (report_text, report_html): an element has tables when its number of
-# rows follows ctx.rows / long tables; breakdown, cache and bash tables have a fixed length
+# has_tables read from the renderers (report_text, report_html): an element has tables when its
+# number of rows follows ctx.rows / long tables; breakdown, cache and bash tables have a fixed length.
+# comparable: --diff (report_text.text_diff, report_html._comparison) has a part for it — time: the
+# token types, breakdown: the projects, cache: long conversations and expired cache, bash: the share
+# of noisy Bash output. sessions, tips, skills and map have none (see report-options.md for why).
 ELEMENT_INFO: Dict[str, ElementInfo] = {
     "activities": ElementInfo(has_tables=True, comparable=True),
     "models": ElementInfo(has_tables=True, comparable=True),
     "sessions": ElementInfo(has_tables=True, comparable=False),
     "tips": ElementInfo(has_tables=False, comparable=False),
-    "time": ElementInfo(has_tables=False, comparable=False),
-    "breakdown": ElementInfo(has_tables=False, comparable=False),
-    "cache": ElementInfo(has_tables=False, comparable=False),
-    "bash": ElementInfo(has_tables=False, comparable=False),
+    "time": ElementInfo(has_tables=False, comparable=True),
+    "breakdown": ElementInfo(has_tables=False, comparable=True),
+    "cache": ElementInfo(has_tables=False, comparable=True),
+    "bash": ElementInfo(has_tables=False, comparable=True),
     "skills": ElementInfo(has_tables=True, comparable=False),
     "map": ElementInfo(has_tables=False, comparable=False),
 }
+
+
+def uncompared(elements: Tuple[str, ...]) -> Tuple[str, ...]:
+    """the elements (of a report) that --diff has no comparison for"""
+    return tuple(e for e in elements if not ELEMENT_INFO[e].comparable)
+
+
+def no_comparison_note(elements: Tuple[str, ...]) -> str:
+    """the line under the --diff comparison; '' when every element is compared"""
+    missing = uncompared(elements)
+    return L("Bez porównania: ", "Not compared: ") + ", ".join(missing) if missing else ""
 
 
 class OptionsError(ValueError):
@@ -156,6 +170,8 @@ def resolve(args: argparse.Namespace, saved: Optional[Settings]) -> ReportPlan:
     origin = {e: how for e in chosen}
     for k in flags:
         origin.setdefault(k, "flag")
-    return ReportPlan(elements=tuple(e for e in ELEMENTS if e in origin),
-                      long_tables=long_tables, diff=args.diff, daily=args.daily,
-                      session=args.session is not None, origin=origin, base=base)
+    elements = tuple(e for e in ELEMENTS if e in origin)
+    note = no_comparison_note(elements) if args.diff else ""
+    return ReportPlan(elements=elements, long_tables=long_tables, diff=args.diff,
+                      daily=args.daily, session=args.session is not None, origin=origin,
+                      base=base, notes=(note,) if note else ())

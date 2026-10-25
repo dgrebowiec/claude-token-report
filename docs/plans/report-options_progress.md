@@ -121,3 +121,66 @@ Plan: [report-options.md](report-options.md)
   - Zamiast dwóch metod `wants`/`shows` jedna `ReportContext.has` (obie i tak znaczyłyby `plan.has`).
   - Brak danych o szumie Basha w syntetycznych transkryptach e2e — obecność sekcji bash przy `--short --bash`
     sprawdzana w `test_waste` (dane z szumem) i w e2e przez brak `--bash` w „More detail”.
+
+## 2026-10-25 — Krok 4: Porównanie (`--diff`) zgodne z sekcjami raportu
+
+- Status: DONE.
+- Zrobione:
+  - `options.py`: `ELEMENT_INFO[*].comparable` — `True` dla `activities`, `models`, `time`, `breakdown`,
+    `cache`, `bash`; `False` dla `sessions`, `tips`, `skills`, `map`. Nowe `uncompared(elements)` i
+    `no_comparison_note(elements)` („Bez porównania: …” / „Not compared: …”, `""` gdy nic). `resolve` przy
+    `--diff` wpisuje tę linię do `plan.notes`.
+  - `report_text.text_diff`: liczby ogólne zawsze (wywołania, surowe, ważone, średnio na wywołanie,
+    trafienia w cache); rodzaje tokenów tylko z `time`; tabele czynności / modeli / projektów tylko z
+    `activities` / `models` / `breakdown`; „Wnioski” tylko z `cache` (długie rozmowy, wygasły cache) i/lub
+    `bash` (nowy wiersz: udział szumu Basha); na końcu linia „Bez porównania”. Wnioski wydzielone do
+    `diff_takeaways(cur, prev, ctx)` — używa ich też HTML.
+  - `report_html._comparison` przepisane na te same części co tekst: tabela ogólna (+ rodzaje tokenów,
+    + trafienia w cache w pp), tabele `<h3>` czynności / modele / projekty (do 12 wierszy, ta sama kolejność
+    co w tekście: suma z obu okresów), „Wnioski” (`<ul>` w karcie), `<p class=sub>` z „Bez porównania”.
+    CSS: `.cmp h3` jak `.sd h3`. MD używa `text_diff`, więc mówi to samo co terminal.
+  - `cli.main`: przy `--diff` i `bash` w planie poprzedni okres dostaje `find_waste(prev_calls, sessions)`
+    (`aggregate(..., hotspots=False)` nie liczy `waste`); bez `bash` — bez dodatkowego liczenia.
+  - Testy: `test_options` — lista porównywalnych, `test_diff_notes_the_elements_without_comparison`;
+    `test_end_to_end` — `test_diff_follows_the_elements_of_the_report` (konfiguracja bez `models` → brak
+    tabeli modeli; z `--breakdown --cache --time` → projekty, wnioski, rodzaje tokenów; tekst, HTML i MD),
+    `test_diff_names_the_elements_without_comparison` (`--skills --diff` → „Not compared: sessions, tips,
+    skills”; `--only activities,models` → brak linii); `test_waste.test_diff_compares_the_bash_noise`.
+  - `docs/references/report-options.md`: sekcja „Porównanie (`--diff`) a elementy raportu” z tabelą
+    element → porównanie, przykłady, opis `notes`.
+- Decyzja `bash` / `skills` (sprawdzone w `stats.py` / `waste.py`):
+  - `bash` — porównywalny: jest prosta liczba `waste.noisy_weighted` (ważone tokeny długich wyników Basha
+    bez ograniczenia, z ponownymi odczytami); porównywany jej udział w zużyciu, jak dwa dotychczasowe wnioski.
+    Koszt: `find_waste` dla poprzedniego okresu, tylko gdy `bash` jest w planie. Bez zmian w obliczeniach.
+  - `skills` — bez porównania: liczby sekcji (skille na liście, tokeny opisów, nieużywane) opisują
+    konfigurację skilli, nie zużycie w okresie, a „używany w N rozmowach” rośnie z liczbą rozmów — zestawienie
+    dwóch okresów nic by nie mówiło.
+  - `sessions`, `tips` (nie wymienione w planie) — bez porównania: ranking rozmów z dwóch okresów to różne
+    rozmowy, podpowiedzi to nie liczby.
+- Weryfikacja:
+  - `python3 -m unittest` — 96 testów OK (było 92).
+  - Ręcznie, `CLAUDE_TOKEN_REPORT_CONFIG` na plik w scratchpadzie
+    (`{"level":"compact","elements":["activities","sessions","skills"]}`), okres 15–21.10:
+    `--only activities,map --diff` → liczby ogólne, czynności, „Not compared: map”; `--diff` → liczby ogólne,
+    czynności, „Not compared: sessions, skills”; `--diff --bash --html` → czynności, „Takeaways” z szumem Basha
+    (0.1% vs 1.3%), „Not compared: sessions, skills”.
+  - Tekst, HTML i MD (`--diff`, `--full --diff`, `--diff --md`) porównane skryptem — te same części i liczby.
+- Zmiany wyjścia domyślnego `--diff` (bez konfiguracji, `--from 2026-10-15 --to 2026-10-21`, przed/po):
+  - tekst / MD z `-l pl` i `en`: znikają wiersze rodzajów tokenów (5 wierszy pod „tokeny ważone” — `time`
+    nie jest w zestawie domyślnym), tabela „PROJEKTY (ważone)” (`breakdown` nie w zestawie) i „WNIOSKI”
+    (`cache` nie w zestawie); dochodzi linia „Bez porównania: sessions, tips”. Czynności i modele bez zmian.
+  - HTML: dochodzi wiersz „trafienia w cache” (był w tekście, nie w HTML), czynności przeniesione z tabeli
+    ogólnej do osobnej tabeli `<h3>` w kolejności z tekstu (suma obu okresów zamiast samego bieżącego —
+    np. „Bash: reading” wyżej, „Bash: build/test/lint” zamiast „asking the user”); dochodzi tabela modeli
+    (wcześniej HTML w ogóle jej nie miał) i linia „Not compared: sessions, tips”.
+  - `--full --diff` i `--md` bez niczego (wszystkie elementy): tekst/MD — dochodzi wniosek o szumie Basha
+    i „Bez porównania: sessions, tips, skills, map”; HTML — dochodzą rodzaje tokenów, trafienia w cache,
+    modele, projekty, wnioski (wszystko, co miał tekst) i ta sama linia.
+  - Raport bez `--diff` — bez zmian (porównane 1:1; jedyne różnice w `--full` to liczby linii zmienionych
+    plików w mapie projektu).
+- Decyzje / odstępstwa:
+  - Trafienia w cache liczone jako część podsumowania (podsumowanie je pokazuje), nie `cache`.
+  - Kolumny HTML zostają „teraz / wcześniej / zmiana” (bez „różnica”) — te same wiersze i wartości co tekst;
+    nazwy projektów w HTML nie są przycinane (tekst przycina do 37 znaków).
+  - `report_html` importuje `diff_takeaways` z `report_text` (jedno miejsce treści wniosków).
+  - Znalezione, nie zmienione: `--all --diff` gubi porównanie bez słowa — wpisane do „Otwarte pytania”.

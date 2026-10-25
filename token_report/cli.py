@@ -23,6 +23,7 @@ from .report_md import md_report
 from .report_text import session_list, text_daily, text_diff, text_report
 from .session_detail import session_detail
 from .stats import aggregate
+from .waste import find_waste
 from .transcripts import Call, default_root, find_session, load, recent_sessions
 
 
@@ -302,8 +303,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     stats = aggregate(current, sessions, namer)
     prev_stats = None
     if prev_start is not None:
-        prev_stats = aggregate([c for c in calls if prev_start <= c.time < start], sessions, namer,
-                               hotspots=False)
+        prev_calls = [c for c in calls if prev_start <= c.time < start]
+        prev_stats = aggregate(prev_calls, sessions, namer, hotspots=False)
+        if plan.has("bash"):  # --diff compares the share of Bash noise
+            prev_stats.waste = find_waste(prev_calls, sessions)
         ctx.prev_label = period_label(prev_start, start)
     daily = _daily_rows(window, calls, current) if args.daily else None
 

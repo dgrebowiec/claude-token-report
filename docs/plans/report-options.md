@@ -7,7 +7,7 @@
 | 1 | Jedno miejsce reguł: `resolve()` i błędy przy sprzecznych flagach | DONE |
 | 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | DONE |
 | 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | DONE |
-| 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | TODO |
+| 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | DONE |
 | 5 | Stopka „Ustawienia tego raportu” | TODO |
 | 6 | `--dry-run`: co pokaże raport, bez liczenia | TODO |
 | 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | TODO |
@@ -353,5 +353,9 @@ jasnym błędem; raport i konfigurator mówią, co pokazano, czego nie i dlaczeg
 ## Otwarte pytania
 
 <Brak. Wcześniejsza praca zacommitowana w `main` 2026-10-25 (a4af4fc); gałąź `report-options` zakładaj od `main`.>
+
+- 2026-10-25 (krok 4) — `--diff` z okresem bez początku (`--all`) nie ma poprzedniego okresu, więc blok
+  porównania znika bez słowa (`periods.previous_window_start` → `None`). Do decyzji: twardy błąd w `resolve`
+  (jak `--session --diff`) czy uwaga w stopce (krok 5). Nie zmienione w kroku 4.
 
 Nie pushuj niczego do `main` (decyzja właściciela 2026-10-25) — tylko lokalne commity.

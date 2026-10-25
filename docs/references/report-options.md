@@ -25,7 +25,7 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | `diff`, `daily`, `session` | modyfikatory i zakres pojedynczej sesji |
 | `origin` | element → `default` / `config` / `preset` / `flag` (skąd się wziął; `--only` = `flag`) |
 | `base` | skąd zestaw bazowy: `default` / `config` / `short` / `full` / `only` / `md` |
-| `notes` | miękkie uwagi do stopki raportu (obecnie zawsze puste) |
+| `notes` | miękkie uwagi do stopki raportu; przy `--diff` — linia „Bez porównania: …” (patrz niżej), inaczej puste |
 | `has(element)` | czy element jest w raporcie |
 
 `ReportContext.plan` przechowuje plan (`cli.main` podaje go przy tworzeniu kontekstu; bez podania —
@@ -92,8 +92,46 @@ notka w podglądzie sekcji).
 - `--full` = wszystkie elementy + `long` (`--full --long` nie jest błędem, `--long` jest wtedy zbędne).
 - Zapisany `level: "long"` daje długie tabele; `--long` przy zapisanym `compact` wydłuża je tylko w tym uruchomieniu.
 
-`ReportPlan.long_tables` niesie wynik. `ElementInfo.comparable` (czy `--diff` ma porównanie dla elementu)
-jest na razie `True` tylko dla `activities` i `models`.
+`ReportPlan.long_tables` niesie wynik.
+
+## Porównanie (`--diff`) a elementy raportu
+
+Blok porównania (tekst: `report_text.text_diff`, HTML: `report_html._comparison`, MD: ten sam tekst co
+w terminalu) składa się wyłącznie z części dla elementów, które są w raporcie — modyfikator nie włącza
+ukrytych elementów. Liczby ogólne (podsumowanie) są zawsze, więc `--diff` zawsze coś porównuje.
+Źródło prawdy: `options.ELEMENT_INFO[element].comparable`.
+
+| Element | Porównanie | Co porównuje |
+|---|---|---|
+| podsumowanie (zawsze) | tak | wywołania modelu, tokeny surowe, tokeny ważone, średnio na wywołanie, trafienia w cache |
+| `activities` | tak | tabela „Na co idą tokeny (ważone)” (do 12 wierszy) |
+| `models` | tak | tabela „Modele (ważone)” |
+| `time` | tak | rodzaje tokenów (ważone) — wiersze pod „tokeny ważone” w tabeli ogólnej |
+| `breakdown` | tak | tabela „Projekty (ważone)” |
+| `cache` | tak | „Wnioski”: udział długich rozmów (kontekst > 200k) i nadmiar przez wygasły cache |
+| `bash` | tak | „Wnioski”: udział szumu z poleceń Bash (długie wyniki bez ograniczenia) w zużyciu |
+| `sessions` | nie | ranking rozmów — rozmowy z dwóch okresów to inne rozmowy, nie ma czego zestawić wiersz w wiersz |
+| `tips` | nie | podpowiedzi to wnioski z bieżącego okresu, nie liczby |
+| `skills` | nie | liczby opisują listę skilli (konfigurację), nie zużycie w okresie; „używane w N rozmowach” zależy od liczby rozmów |
+| `map` | nie | poprzedni okres liczony bez mapy projektu (`aggregate(..., hotspots=False)`) |
+
+Tabele grup (czynności, modele, projekty) mają do 12 wierszy, kolejność według sumy ważonych tokenów
+z obu okresów — tak samo w tekście i HTML (HTML nie ma kolumny „różnica”, tylko „zmiana” ze strzałką).
+Dla `bash` poprzedni okres dostaje `waste.find_waste` w `cli.main` tylko wtedy, gdy `bash` jest w planie
+(`aggregate(..., hotspots=False)` go nie liczy).
+
+Pod blokiem porównania jedna linia „Bez porównania: <elementy>” / „Not compared: <elementy>” — elementy
+z raportu bez porównania, nazwami jak w `--only`; pomijana, gdy lista jest pusta
+(`options.no_comparison_note`, `options.uncompared`). Ta sama linia trafia do `ReportPlan.notes`
+(dla stopki „Ustawienia tego raportu”). Przykłady:
+
+- domyślny raport + `--diff` → podsumowanie, czynności, modele; „Bez porównania: sessions, tips”;
+- `--only activities,map --diff` → podsumowanie, czynności; „Bez porównania: map”;
+- `--full --diff` → wszystkie części; „Bez porównania: sessions, tips, skills, map”;
+- `--only activities,models --diff` → bez linii „Bez porównania”.
+
+Uwaga: przy `--all` (brak początku okresu) nie ma poprzedniego okresu i bloku porównania — bez komunikatu
+(do rozstrzygnięcia w kolejnych krokach).
 
 ## Plik konfiguracji i migracja starych poziomów
 
@@ -158,4 +196,7 @@ z pliku, konfigurator (zapis `long`, podgląd `compact`/`long`, przywracanie dom
 `--short` jako zestaw elementów: `test_short`, `test_short_is_a_set_of_elements` (flagi sekcji dopisują się,
 `--short --long` — te same sekcje), `test_html_short_keeps_comparison_and_daily` (`--short --diff --html` ma
 porównanie, `--short --daily --html` — „dzień po dniu”), `--session --short` ma fazy sesji;
-`tests/test_waste.py` — plan `--short --bash` renderuje sekcję bash w tekście i HTML.
+`tests/test_waste.py` — plan `--short --bash` renderuje sekcję bash w tekście i HTML; porównanie szumu Basha
+(`test_diff_compares_the_bash_noise`). Porównanie według elementów: `test_diff_follows_the_elements_of_the_report`
+i `test_diff_names_the_elements_without_comparison` (tekst, HTML, MD), `test_diff_notes_the_elements_without_comparison`
+(`plan.notes`), lista porównywalnych w `test_element_info_covers_every_element`.

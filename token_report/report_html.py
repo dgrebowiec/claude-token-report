@@ -14,7 +14,9 @@ from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_re
                          side_name)
 from .hotspots import LARGE_FILE, Item, ProjectHotspots, column_name, limits_note, status
 from .i18n import L, get_lang, weekday
+from .options import no_comparison_note
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
+from .report_text import diff_takeaways
 from .session_detail import (SessionDetail, details_for, effort_name, fmt_duration,
                              ultracode_text)
 from .stats import (CTX_BUCKETS, FEW_CALLS, GAP_BUCKETS, LONG_CONTEXT, TOP_REBUILDS, Bucket, Stats,
@@ -107,6 +109,8 @@ def _explanation() -> str:
 
 
 def _comparison(stats: Stats, prev: Optional[Stats], ctx: ReportContext) -> str:
+    """--diff: the same parts as report_text.text_diff — the summary numbers always, a table for
+    each comparable element of the report, the takeaways, then the elements without a comparison"""
     if prev is None:
         return ""
 
@@ -115,21 +119,53 @@ def _comparison(stats: Stats, prev: Optional[Stats], ctx: ReportContext) -> str:
         return (f"<tr><td class=l>{E(name)}</td><td class=n>{fmt(a)}</td><td class=n>{fmt(b)}</td>"
                 f"<td class='n {cls}'>{arrow(a, b)} {fmt_change(a, b)}</td></tr>")
 
-    def activity_w(s: Stats, key: str) -> float:
-        return s.by_activity[key].weighted if key in s.by_activity else 0
+    def table(rows: List[str]) -> str:
+        return (f"<div class=wrap><table><tr><th></th><th class=n>{L('teraz', 'now')}</th>"
+                f"<th class=n>{L('wcześniej', 'before')}</th><th class=n>{L('zmiana', 'change')}"
+                f"</th></tr>{''.join(rows)}</table></div>")
+
+    def groups(title: str, cur: Mapping[str, Bucket], old: Mapping[str, Bucket],
+               names: Callable[[str], str] = str) -> str:
+        def w(g: Mapping[str, Bucket], key: str) -> float:
+            return g[key].weighted if key in g else 0.0
+        keys = sorted(set(cur) | set(old), key=lambda k: -w(cur, k) - w(old, k))[:12]
+        return f"<h3>{title}</h3>" + table([row(names(k), w(cur, k), w(old, k), fmt_tok)
+                                            for k in keys])
 
     rows = [row(L("wywołania modelu", "model calls"), stats.n_calls, prev.n_calls, fmt_int),
             row(L("tokeny surowe", "raw tokens"), stats.raw or 1, prev.raw, fmt_tok),
-            row(L("tokeny ważone", "weighted tokens"), stats.weighted, prev.weighted, fmt_tok),
-            row(L("średnio na wywołanie", "average per call"), stats.weighted / max(stats.n_calls, 1),
-                prev.weighted / max(prev.n_calls, 1), fmt_tok)]
-    keys = sorted(set(stats.by_activity) | set(prev.by_activity),
-                  key=lambda k: -activity_w(stats, k))[:12]
-    rows += [row(activity_name(k), activity_w(stats, k), activity_w(prev, k), fmt_tok) for k in keys]
-    return (f"<h2>{L('Porównanie', 'Comparison')}{qm('compare')}</h2><p class=sub>"
-            f"{E(ctx.label)} vs {E(ctx.prev_label)}</p><div class=wrap><table><tr><th>"
-            f"</th><th class=n>{L('teraz', 'now')}</th><th class=n>{L('wcześniej', 'before')}"
-            f"</th><th class=n>{L('zmiana', 'change')}</th></tr>{''.join(rows)}</table></div>")
+            row(L("tokeny ważone", "weighted tokens"), stats.weighted, prev.weighted, fmt_tok)]
+    if ctx.has("time"):  # the token types
+        rows += [row("\u00a0\u00a0" + type_name(t), stats.weighted_by_type[t],
+                     prev.weighted_by_type[t], fmt_tok)
+                 for t in TOKEN_TYPES if stats.weighted_by_type[t] or prev.weighted_by_type[t]]
+    rows.append(row(L("średnio na wywołanie", "average per call"),
+                    stats.weighted / max(stats.n_calls, 1), prev.weighted / max(prev.n_calls, 1),
+                    fmt_tok))
+    hit_cur, hit_prev = cache_hit(stats.tokens) or 0, cache_hit(prev.tokens) or 0
+    cls = "up" if hit_cur > hit_prev else "down"
+    rows.append(f"<tr><td class=l>{L('trafienia w cache', 'cache hit rate')}</td>"
+                f"<td class=n>{hit_cur:.1f}%</td><td class=n>{hit_prev:.1f}%</td>"
+                f"<td class='n {cls}'>{arrow(hit_cur, hit_prev)} {hit_cur - hit_prev:+.1f}pp</td></tr>")
+    parts = [f"<h2>{L('Porównanie', 'Comparison')}{qm('compare')}</h2><p class=sub>"
+             f"{E(ctx.label)} vs {E(ctx.prev_label)}</p><div class=cmp>", table(rows)]
+    if ctx.has("activities"):
+        parts.append(groups(L("Na co idą tokeny (ważone)", "Where the tokens go (weighted)"),
+                            stats.by_activity, prev.by_activity, activity_name))
+    if ctx.has("models"):
+        parts.append(groups(L("Modele (ważone)", "Models (weighted)"), stats.by_model,
+                            prev.by_model))
+    if ctx.has("breakdown"):
+        parts.append(groups(L("Projekty (ważone)", "Projects (weighted)"), stats.by_project,
+                            prev.by_project))
+    takeaways = diff_takeaways(stats, prev, ctx)
+    if takeaways:
+        items = "".join(f"<li>{E(t)}</li>" for t in takeaways)
+        parts.append(f"<h3>{L('Wnioski', 'Takeaways')}</h3><div class=card><ul>{items}</ul></div>")
+    note = no_comparison_note(ctx.plan.elements)
+    if note:
+        parts.append(f"<p class=sub>{E(note)}</p>")
+    return "".join(parts) + "</div>"
 
 
 def _daily(rows: Optional[List[DayRow]]) -> str:

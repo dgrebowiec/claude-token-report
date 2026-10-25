@@ -156,6 +156,28 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("SKILLS", text_report(stats, short_bash))
         self.assertIn("Bash noise", html_report(stats, short_bash))
 
+    def test_diff_compares_the_bash_noise(self):
+        from token_report.context import ReportContext
+        from token_report.naming import Namer
+        from token_report.options import ReportPlan
+        from token_report.report_html import html_report
+        from token_report.report_text import text_diff
+        from token_report.stats import aggregate
+
+        i18n.set_lang("en")
+        namer = Namer(private=False)
+        sessions = {("proj", "s1"): SessionMeta("proj")}
+        noisy = [_call(i, [("Bash", {"command": "git diff"})], [BIG]) for i in range(3)]
+        stats = aggregate(noisy, sessions, namer)
+        prev = aggregate(noisy[:1], sessions, namer)
+        self.assertGreater(stats.waste.noisy_weighted, 0)
+        bash = ReportPlan(elements=("activities", "bash"))
+        ctx = ReportContext("now", "~", sessions, namer, noisy, plan=bash)
+        self.assertIn("Bash noise (long results with no limit)", text_diff(stats, prev, ctx))
+        self.assertIn("Bash noise (long results with no limit)", html_report(stats, ctx, prev))
+        ctx.plan = ReportPlan(elements=("activities",))
+        self.assertNotIn("Bash noise", text_diff(stats, prev, ctx))
+
 
 if __name__ == "__main__":
     unittest.main()

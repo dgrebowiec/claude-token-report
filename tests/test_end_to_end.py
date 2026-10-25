@@ -323,6 +323,46 @@ class EndToEndTest(unittest.TestCase):
             self.run_cli("--date", "2020-01-01")
         self.assertIn("no data", str(cm.exception.code))
 
+    def comparison(self, *args):
+        """the --diff block of the text report, of the HTML page and of the Markdown file"""
+        text = self.run_cli("--days", "3650", "--diff", *args)
+        text = text.split("CLAUDE CODE TOKEN USAGE")[0]
+        page_path = os.path.join(self.tmp.name, "r.html")
+        md_path = os.path.join(self.tmp.name, "r.md")
+        self.run_cli("--days", "3650", "--diff", "--html", page_path, *args)
+        self.run_cli("--days", "3650", "--diff", "--md", md_path, *args)
+        with open(page_path, encoding="utf-8") as f:
+            page = f.read()
+        with open(md_path, encoding="utf-8") as f:
+            md = f.read()
+        page = page[page.index("<h2>Comparison"):]
+        page = page[:page.index("<h2>", 5)]
+        md = md.split("## Comparison with the previous period")[1].split("## ")[0]
+        return text, page, md
+
+    def test_diff_follows_the_elements_of_the_report(self):
+        self.save_settings("compact", ["activities", "sessions"])  # no models
+        for part in self.comparison():
+            low = part.lower()
+            self.assertIn("weighted tokens", low)  # the summary numbers: always
+            self.assertIn("where the tokens go", low)
+            self.assertNotIn("models (weighted)", low)
+            self.assertNotIn("projects (weighted)", low)
+            self.assertNotIn("takeaways", low)
+            self.assertIn("Not compared: sessions", part)
+        for part in self.comparison("--breakdown", "--cache", "--time"):
+            low = part.lower()
+            self.assertIn("projects (weighted)", low)
+            self.assertIn("takeaways", low)
+            self.assertIn("long conversations", low)
+            self.assertIn("cache read", low)  # time: the token types
+
+    def test_diff_names_the_elements_without_comparison(self):
+        for part in self.comparison("--no-config", "--skills"):
+            self.assertIn("Not compared: sessions, tips, skills", part)
+        for part in self.comparison("--only", "activities,models"):
+            self.assertNotIn("Not compared", part)
+
     def save_settings(self, level, elements):
         with open(self.config, "w", encoding="utf-8") as f:
             json.dump({"level": level, "elements": elements}, f)

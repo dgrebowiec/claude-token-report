@@ -13,6 +13,7 @@ from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, ho
 from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, Item, column_name, limits_note, status
 from .i18n import L, weekday
 from .naming import Namer
+from .options import no_comparison_note
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
 from .session_detail import SessionDetail, effort_name, fmt_duration, ultracode_text
 from .stats import (CAUSE_COMPACT, CAUSE_EXPIRED, CAUSE_MODEL, CAUSE_OTHER, CAUSES, CTX_BUCKETS,
@@ -898,6 +899,8 @@ def _compare_groups(out: _Lines, title: str, cur: Mapping[str, Bucket],
 
 
 def text_diff(cur: Stats, prev: Stats, ctx: ReportContext, color: bool = False) -> str:
+    """the --diff block: the summary numbers always, then a part for each comparable element
+    of the report (options.ELEMENT_INFO), then the elements left without a comparison"""
     out = _Lines(color=color)
     s = out.s
     out.rule()
@@ -914,33 +917,60 @@ def text_diff(cur: Stats, prev: Stats, ctx: ReportContext, color: bool = False) 
     row(L("wywołania modelu", "model calls"), cur.n_calls, prev.n_calls, fmt_int)
     row(L("tokeny surowe", "raw tokens"), cur.raw, prev.raw, fmt_tok)
     row(L("tokeny ważone", "weighted tokens"), cur.weighted, prev.weighted, fmt_tok)
-    for t in TOKEN_TYPES:
-        if cur.weighted_by_type[t] or prev.weighted_by_type[t]:
-            row("  " + type_name(t), cur.weighted_by_type[t], prev.weighted_by_type[t], fmt_tok)
+    if ctx.has("time"):  # the token types
+        for t in TOKEN_TYPES:
+            if cur.weighted_by_type[t] or prev.weighted_by_type[t]:
+                row("  " + type_name(t), cur.weighted_by_type[t], prev.weighted_by_type[t], fmt_tok)
     row(L("średnio na wywołanie", "average per call"), cur.weighted / max(cur.n_calls, 1),
         prev.weighted / max(prev.n_calls, 1), fmt_tok)
     hit_cur, hit_prev = cache_hit(cur.tokens) or 0, cache_hit(prev.tokens) or 0
     out.add(f" {L('trafienia w cache', 'cache hit rate'):<30}{s.bold(f'{hit_cur:>11.1f}%')}"
             f"{hit_prev:>11.1f}%{hit_cur - hit_prev:>+8.1f}pp", kind="row")
 
-    _compare_groups(out, L("NA CO IDĄ TOKENY (ważone)", "WHERE THE TOKENS GO (weighted)"),
-                    cur.by_activity, prev.by_activity, activity_name)
-    _compare_groups(out, L("MODELE (ważone)", "MODELS (weighted)"), cur.by_model, prev.by_model)
-    _compare_groups(out, L("PROJEKTY (ważone)", "PROJECTS (weighted)"), cur.by_project,
-                    prev.by_project, lambda k: short(k, 37))
-    long_cur, long_prev = cur.long_context_weighted(), prev.long_context_weighted()
-    waste_cur, waste_prev = cur.rebuilds.waste, prev.rebuilds.waste
-    out.header(L("WNIOSKI", "TAKEAWAYS"))
-    out.bullet(L(f"długie rozmowy (kontekst > 200k): {pct(long_cur, cur.weighted):.0f}% zużycia "
-                 f"(wcześniej {pct(long_prev, prev.weighted):.0f}%)",
-                 f"long conversations (context > 200k): {pct(long_cur, cur.weighted):.0f}% "
-                 f"of usage (before {pct(long_prev, prev.weighted):.0f}%)"))
-    out.bullet(L(f"nadmiar przez wygasły cache: {pct(waste_cur, cur.weighted):.1f}% "
-                 f"(wcześniej {pct(waste_prev, prev.weighted):.1f}%)",
-                 f"extra from expired cache: {pct(waste_cur, cur.weighted):.1f}% "
-                 f"(before {pct(waste_prev, prev.weighted):.1f}%)"))
+    if ctx.has("activities"):
+        _compare_groups(out, L("NA CO IDĄ TOKENY (ważone)", "WHERE THE TOKENS GO (weighted)"),
+                        cur.by_activity, prev.by_activity, activity_name)
+    if ctx.has("models"):
+        _compare_groups(out, L("MODELE (ważone)", "MODELS (weighted)"), cur.by_model, prev.by_model)
+    if ctx.has("breakdown"):
+        _compare_groups(out, L("PROJEKTY (ważone)", "PROJECTS (weighted)"), cur.by_project,
+                        prev.by_project, lambda k: short(k, 37))
+    takeaways = diff_takeaways(cur, prev, ctx)
+    if takeaways:
+        out.header(L("WNIOSKI", "TAKEAWAYS"))
+        for line in takeaways:
+            out.bullet(line)
+    note = no_comparison_note(ctx.plan.elements)
+    if note:
+        out.add()
+        out.add(" " + s.dim(note))
     out.rule()
     return out.render()
+
+
+def diff_takeaways(cur: Stats, prev: Stats, ctx: ReportContext) -> List[str]:
+    """the shares compared by --diff for cache (long conversations, expired cache) and bash"""
+    lines = []
+    if ctx.has("cache"):
+        long_cur, long_prev = cur.long_context_weighted(), prev.long_context_weighted()
+        waste_cur, waste_prev = cur.rebuilds.waste, prev.rebuilds.waste
+        lines.append(L(f"długie rozmowy (kontekst > 200k): {pct(long_cur, cur.weighted):.0f}% zużycia "
+                       f"(wcześniej {pct(long_prev, prev.weighted):.0f}%)",
+                       f"long conversations (context > 200k): {pct(long_cur, cur.weighted):.0f}% "
+                       f"of usage (before {pct(long_prev, prev.weighted):.0f}%)"))
+        lines.append(L(f"nadmiar przez wygasły cache: {pct(waste_cur, cur.weighted):.1f}% "
+                       f"(wcześniej {pct(waste_prev, prev.weighted):.1f}%)",
+                       f"extra from expired cache: {pct(waste_cur, cur.weighted):.1f}% "
+                       f"(before {pct(waste_prev, prev.weighted):.1f}%)"))
+    if ctx.has("bash"):
+        noise_cur, noise_prev = cur.waste.noisy_weighted, prev.waste.noisy_weighted
+        lines.append(L(f"szum z poleceń Bash (długie wyniki bez ograniczenia): "
+                       f"{pct(noise_cur, cur.weighted):.1f}% zużycia "
+                       f"(wcześniej {pct(noise_prev, prev.weighted):.1f}%)",
+                       f"Bash noise (long results with no limit): "
+                       f"{pct(noise_cur, cur.weighted):.1f}% of usage "
+                       f"(before {pct(noise_prev, prev.weighted):.1f}%)"))
+    return lines
 
 
 # --------------------------------------------------------------------------- --daily
