@@ -193,7 +193,8 @@ class MigrationTest(unittest.TestCase):
                                (["--diff"], "--diff"), (["--daily"], "--daily"),
                                (["--session"], "--session"), (["--html", "x"], "--html"),
                                (["--md", "x"], "--md"), (["--private"], "--private"),
-                               (["--no-config"], "--no-config"), (["--today"], "--today")):
+                               (["--no-config"], "--no-config"), (["--today"], "--today"),
+                               (["--dry-run"], "--dry-run")):
                 with self.subTest(cmd=cmd, opt=opt):
                     self.assertError(*cmd, *opt, words=(cmd[0], shown))
         self.assertError("--list", "--explain", words=("--list", "--explain"))
@@ -301,6 +302,94 @@ class CliErrorTest(unittest.TestCase):
             f.write('{"level": "normal", "elements": ["models"]}')
         self.run_error("--reset-config", "--bash")
         self.assertTrue(os.path.exists(path))
+
+
+class DryRunTest(unittest.TestCase):
+    """--dry-run prints the plan of the report and reads nothing"""
+
+    def setUp(self):
+        i18n.set_lang("en")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = os.path.join(self.tmp.name, "settings.json")
+        self._env = mock.patch.dict(os.environ, {"CLAUDE_TOKEN_REPORT_CONFIG": self.cfg})
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+        self.tmp.cleanup()
+
+    def dry_run(self, *argv):
+        """stdout of main(); reading the transcripts or their directory fails the test"""
+        def no_reading(*a, **k):
+            raise AssertionError("--dry-run read the transcripts")
+        out = io.StringIO()
+        with mock.patch("token_report.cli.load", no_reading), \
+                mock.patch("token_report.cli.find_session", no_reading), \
+                mock.patch("token_report.cli.recent_sessions", no_reading), \
+                contextlib.redirect_stdout(out):
+            main(["--dir", os.path.join(self.tmp.name, "missing"), *argv, "--dry-run"])
+        return out.getvalue().splitlines()
+
+    def test_short_bash_diff(self):
+        lines = self.dry_run("--short", "--bash", "--diff", "--from", "2026-10-15",
+                             "--to", "2026-10-21")
+        self.assertTrue(lines[0].startswith("--dry-run: what the report would show"))
+        text = "\n".join(lines)
+        self.assertIn(" Period:       2026-10-15..2026-10-21 (7 days)", lines)
+        self.assertIn("summary     always", text)
+        self.assertIn("activities  --short", text)
+        self.assertIn("bash        --bash", text)
+        self.assertNotIn("tips", text.split("Report footer")[0])
+        self.assertIn(" Modifiers:    --diff: compared with 2026-10-08..2026-10-14 (7 days); "
+                      "not compared: sessions", lines)
+        self.assertIn("(not checked)", text)  # the directory does not exist and that is fine
+
+    def test_footer_is_the_report_footer(self):
+        lines = self.dry_run("--short", "--bash", "--diff", "--from", "2026-10-15",
+                             "--to", "2026-10-21")
+        footer = describe_plan(plan("--short", "--bash", "--diff"),
+                               "2026-10-08..2026-10-14 (7 days)")
+        self.assertEqual(lines[-len(footer):], ["   " + l for l in footer])
+
+    def test_saved_settings_and_a_section_flag(self):
+        with open(self.cfg, "w", encoding="utf-8") as f:
+            f.write('{"level": "long", "elements": ["activities", "skills"]}')
+        text = "\n".join(self.dry_run("--bash", "--daily"))
+        self.assertIn("activities  the configuration", text)
+        self.assertIn("skills      the configuration", text)
+        self.assertIn("bash        --bash", text)
+        self.assertNotIn("models", text.split("Report footer")[0])
+        self.assertIn("long (10 rows); no change (no tables): bash", text)
+        self.assertIn("--daily: day by day", text)
+        self.assertIn("sections from the configuration", text)
+
+    def test_files_are_not_written(self):
+        html, md = os.path.join(self.tmp.name, "r.html"), os.path.join(self.tmp.name, "r.md")
+        text = "\n".join(self.dry_run("--html", html, "--md", md, "--private"))
+        self.assertIn(f"HTML: {html}, Markdown: {md} (not written)", text)
+        self.assertIn("--private", text)
+        self.assertFalse(os.path.exists(html) or os.path.exists(md))
+
+    def test_session_is_not_looked_up(self):
+        text = "\n".join(self.dry_run("--session", "1a2b", "--only", "models"))
+        self.assertIn("one session: 1a2b (looked up when the report runs)", text)
+        self.assertIn(" Period:       the whole session", text)
+        self.assertIn("models      --only", text)
+
+    def test_polish_and_errors(self):
+        i18n.set_lang("pl")
+        try:
+            text = "\n".join(self.dry_run("-l", "pl", "--today"))
+        finally:
+            i18n.set_lang("en")
+        self.assertIn("Okres:        dzisiaj", text)
+        self.assertIn("Modyfikatory: brak", text)
+        for argv in (["--short", "--full"], ["--all", "--diff"], ["--days", "0"],
+                     ["--list"], ["--explain"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as cm:
+                self.dry_run(*argv)
+            self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":

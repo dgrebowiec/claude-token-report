@@ -110,7 +110,8 @@ def report_options(args: argparse.Namespace) -> List[str]:
                            ("--only", args.only is not None), ("--diff", args.diff),
                            ("--daily", args.daily), ("--session", args.session is not None),
                            ("--html", args.html is not None), ("--md", args.md is not None),
-                           ("--private", args.private), ("--no-config", args.no_config)) if v]
+                           ("--private", args.private), ("--no-config", args.no_config),
+                           ("--dry-run", args.dry_run)) if v]
     return got
 
 
@@ -234,4 +235,81 @@ def describe_plan(plan: ReportPlan, prev_label: str = "",
                  + L("tokeny surowe i ważone: --explain", "raw and weighted tokens: --explain"))
     shown = no_comparison_note(plan.elements)  # already under the comparison block
     lines += [n for n in plan.notes if n != shown]
+    return lines
+
+
+def _origin_label(plan: ReportPlan, element: str) -> str:
+    """where an element of the plan comes from, as the user would set it"""
+    how = plan.origin.get(element, "")
+    if element in plan.only:
+        return "--only"
+    if how == "flag":
+        return SECTION_FLAGS.get(element, "--only")
+    if how == "preset":
+        return {"short": "--short", "full": "--full",
+                "md": L("--md (domyślnie wszystko)", "--md (everything by default)")}[plan.base]
+    if how == "config":
+        return L("konfiguracja", "the configuration")
+    return L("zestaw domyślny", "the default set")
+
+
+def describe_dry_run(plan: ReportPlan, period: str, prev_label: str = "",
+                     session: Optional[str] = None, html: Optional[str] = None,
+                     md: Optional[str] = None, private: bool = False, root: str = "",
+                     config_path: Optional[str] = None) -> List[str]:
+    """--dry-run: what the report would show, without reading the transcripts. The closing
+    lines are the report footer itself (describe_plan), so the two cannot disagree."""
+    def row(name: str, value: str) -> str:
+        return f" {name:<14}{value}"
+
+    pad = " " * 15
+    lines = [L("--dry-run: co pokaże raport — nic nie policzono, transkrypty nie zostały przeczytane",
+               "--dry-run: what the report would show — nothing counted, no transcripts read")]
+    lines.append(row(L("Okres:", "Period:"), period))
+    if session is None:
+        scope = L("cała historia z okresu", "all history in the period")
+    else:
+        which = (L("najnowsza", "the latest") if session == "latest" else session)
+        scope = (L("jedna sesja: ", "one session: ") + which
+                 + L(" (szukana dopiero przy raporcie)", " (looked up when the report runs)"))
+    lines.append(row(L("Zakres:", "Scope:"), scope))
+    width = max(len(e) for e in ELEMENTS)
+    entries = [(L("podsumowanie", "summary"), L("zawsze", "always"))]
+    entries += [(e, _origin_label(plan, e)) for e in plan.elements]
+    width = max(width, len(entries[0][0]))
+    for i, (name, origin) in enumerate(entries):
+        lines.append((row(L("Elementy:", "Elements:"), "") if i == 0 else pad)
+                     + f"{name:<{width}}  {origin}")
+    tables = (L("długie (10 wierszy)", "long (10 rows)") if plan.long_tables
+              else L("krótkie (5 wierszy)", "compact (5 rows)"))
+    fixed = [e for e in plan.elements if not ELEMENT_INFO[e].has_tables]
+    if plan.long_tables and fixed:
+        tables += L("; bez zmian (bez tabel): ", "; no change (no tables): ") + ", ".join(fixed)
+    lines.append(row(L("Tabele:", "Tables:"), tables))
+    mods = []
+    if plan.diff:
+        diff = "--diff: " + (L("porównanie z ", "compared with ") + prev_label if prev_label
+                             else L("porównanie z poprzednim okresem",
+                                    "compared with the previous window"))
+        missing = uncompared(plan.elements)
+        if missing:
+            diff += L("; bez porównania: ", "; not compared: ") + ", ".join(missing)
+        mods.append(diff)
+    if plan.daily:
+        mods.append("--daily: " + L("dzień po dniu", "day by day"))
+    for i, m in enumerate(mods or [L("brak", "none")]):
+        lines.append((row(L("Modyfikatory:", "Modifiers:"), "") if i == 0 else pad) + m)
+    outputs = [kind + path for kind, path in (("HTML: ", html), ("Markdown: ", md))
+               if path is not None]
+    output = (", ".join(outputs) + L(" (nie zapisano)", " (not written)") if outputs
+              else L("terminal", "the terminal"))
+    if private:
+        output += L(" · ukryte nazwy projektów i plików (--private)",
+                    " · project and file names hidden (--private)")
+    lines.append(row(L("Wyjście:", "Output:"), output))
+    if root:
+        lines.append(row(L("Transkrypty:", "Transcripts:"),
+                         root + L(" (nie sprawdzano)", " (not checked)")))
+    lines.append(L(" Stopka raportu:", " Report footer:"))
+    lines += ["   " + line for line in describe_plan(plan, prev_label, config_path)]
     return lines

@@ -191,6 +191,70 @@ Przykład — `--short --diff` (en):
  Your own saved set: --configure · raw and weighted tokens: --explain
 ```
 
+## `--dry-run`: co pokaże raport, bez liczenia
+
+`--dry-run` (grupa „wyjście”) wypisuje plan raportu i kończy — bez czytania transkryptów, bez zapisu plików
+`--html` / `--md`. W `cli.main` działa po `resolve` (twarde błędy jak zwykle, kod 2) i po `resolve_window`
+(błędy okresu też), ale **przed** sprawdzeniem katalogu transkryptów, szukaniem sesji i `load(...)`:
+
+- katalog (`--dir` albo `~/.claude/projects`) nie jest sprawdzany — `--dir /nieistniejący --dry-run` działa,
+  wynik mówi „(nie sprawdzano)”;
+- `--session ID` nie jest szukana („szukana dopiero przy raporcie”); bez okresu — „cała sesja”;
+- plik z `--html` / `--md` nie powstaje („(nie zapisano)”).
+
+Treść (`options.describe_dry_run`, dwujęzyczna): okres (`periods.period_label`, ten sam co w nagłówku raportu),
+zakres, elementy z pochodzeniem (podsumowanie — zawsze; `zestaw domyślny`, `konfiguracja`, `--short` / `--full`,
+`--md (domyślnie wszystko)`, `--only`, flaga sekcji), długość tabel (przy `long` — elementy bez tabel, których to
+nie zmienia, z `ELEMENT_INFO`), modyfikatory (`--diff` z poprzednim okresem i elementami bez porównania, `--daily`),
+wyjście (terminal / pliki, `--private`), katalog transkryptów. Na końcu **stopka raportu** — dokładnie linie
+`describe_plan`, które ten sam raport wypisze na końcu (jedno źródło, bez osobnej logiki).
+
+`--dry-run` jest opcją raportu: z osobnym poleceniem (`--list --dry-run` itd.) → błąd
+„--list is a separate command, it takes no report options: --dry-run”.
+
+Przykład — `--short --bash --diff --from 2026-10-15 --to 2026-10-21 --dry-run` (bez konfiguracji):
+
+```text
+--dry-run: what the report would show — nothing counted, no transcripts read
+ Period:       2026-10-15..2026-10-21 (7 days)
+ Scope:        all history in the period
+ Elements:     summary     always
+               activities  --short
+               models      --short
+               sessions    --short
+               bash        --bash
+ Tables:       compact (5 rows)
+ Modifiers:    --diff: compared with 2026-10-08..2026-10-14 (7 days); not compared: sessions
+ Output:       the terminal
+ Transcripts:  ~/.claude/projects (not checked)
+ Report footer:
+   Settings: --short + --bash · compact tables (5 rows) · compared with 2026-10-08..2026-10-14 (7 days), not compared: sessions
+   More detail: --time --breakdown --cache --skills --project-map  or --full (everything)
+   Your own saved set: --configure · raw and weighted tokens: --explain
+```
+
+Przykład — konfiguracja `{"level":"compact","elements":["activities","sessions","skills"]}` +
+`-l pl --bash --long --daily --html raport.html --dry-run` (okres 15–21.10):
+
+```text
+--dry-run: co pokaże raport — nic nie policzono, transkrypty nie zostały przeczytane
+ Okres:        2026-10-15..2026-10-21 (7 dni)
+ Zakres:       cała historia z okresu
+ Elementy:     podsumowanie  zawsze
+               activities    konfiguracja
+               sessions      konfiguracja
+               bash          --bash
+               skills        konfiguracja
+ Tabele:       długie (10 wierszy); bez zmian (bez tabel): bash
+ Modyfikatory: --daily: dzień po dniu
+ Wyjście:      HTML: raport.html (nie zapisano)
+ Transkrypty:  ~/.claude/projects (nie sprawdzano)
+ Stopka raportu:
+   Ustawienia: sekcje z konfiguracji (~/.claude/claude-token-report.json) + --bash · tabele długie (10 wierszy) · dzień po dniu
+   Więcej szczegółów: --time --breakdown --cache --project-map  albo --full (wszystko)
+   Bez konfiguracji: --no-config · zmiana: --configure · tokeny surowe i ważone: --explain
+```
+
 ## Plik konfiguracji i migracja starych poziomów
 
 `~/.claude/claude-token-report.json` (albo `CLAUDE_TOKEN_REPORT_CONFIG`): `{"level": "compact" | "long",
@@ -241,7 +305,7 @@ Kolejność w raporcie jest zawsze kolejnością `ELEMENTS`, nie kolejnością n
 
 Osobne polecenia: `--list`, `--explain`, `--configure`, `--reset-config`. Opcje raportu: okres
 (`--days`, `--date`, `--from`, `--to`, `--today`, `--yesterday`, `--all`, `--rolling`), flagi sekcji,
-`--short`, `--full`, `--long`, `--only`, `--diff`, `--daily`, `--session`, `--html`, `--md`, `--private`, `--no-config`.
+`--short`, `--full`, `--long`, `--only`, `--diff`, `--daily`, `--session`, `--html`, `--md`, `--private`, `--no-config`, `--dry-run`.
 Opcje globalne dozwolone wszędzie: `--lang`, `--color` / `--no-color`, `--dir`.
 
 `--session --daily` i `--all --daily` są dozwolone (dni jednej sesji / całej historii).
@@ -261,4 +325,6 @@ i `test_diff_names_the_elements_without_comparison` (tekst, HTML, MD), `test_dif
 (`plan.notes`), lista porównywalnych w `test_element_info_covers_every_element`. Stopka: `DescribePlanTest`
 w `tests/test_options.py` (bazy `default`, `config` + flaga, `short` z `--diff --daily`, `only`, `full`, `md`,
 po polsku, ścieżka z `~`), `test_every_format_ends_with_the_settings_footer` (tekst, HTML, MD mówią to samo,
-stopka raz) i `test_footer_follows_the_preset` w `tests/test_end_to_end.py`.
+stopka raz) i `test_footer_follows_the_preset` w `tests/test_end_to_end.py`. `--dry-run`: `DryRunTest` w `tests/test_options.py` (plan dla `--short --bash --diff`,
+stopka = `describe_plan`, konfiguracja + flaga sekcji, pliki niezapisane, sesja nieszukana, błędy; odczyt
+transkryptów — `load`, `find_session`, `recent_sessions` — kończy test błędem).

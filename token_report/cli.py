@@ -15,7 +15,7 @@ from .explain import explain_text
 from .formatting import fmt_tok
 from .i18n import L
 from .naming import Namer
-from .options import OptionsError, parse_only, resolve
+from .options import OptionsError, ReportPlan, describe_dry_run, parse_only, resolve
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
@@ -160,6 +160,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("zapisz raport jako Markdown do analizy przez Claude'a (domyślnie z pełnym "
                           "szczegółem)",
                           "write the report as Markdown for Claude to analyze (full detail by default)"))
+    g.add_argument("--dry-run", action="store_true",
+                   help=L("pokaż, co zawierałby raport (okres, elementy i skąd są, tabele, "
+                          "porównanie, wyjście), bez czytania transkryptów i zapisu plików",
+                          "show what the report would contain (period, elements and where they "
+                          "come from, tables, comparison, output) without reading the transcripts "
+                          "or writing files"))
     g.add_argument("--private", action="store_true",
                    help=L("ukryj nazwy projektów, plików i treść próśb (do udostępniania)",
                           "hide project/file names and prompt text (for sharing)"))
@@ -231,6 +237,29 @@ def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
     print(L("otwórz: ", "open: ") + link)
 
 
+def _window(ap: argparse.ArgumentParser, args: argparse.Namespace) -> Window:
+    try:
+        window = resolve_window(args)
+    except ValueError as e:
+        ap.error(str(e))
+    if args.session and not picked_options(args):
+        window.start, window.first = None, None  # a session report covers the whole session
+    return window
+
+
+def _dry_run(args: argparse.Namespace, plan: ReportPlan, window: Window, root: str) -> None:
+    """--dry-run: the plan of the report; neither the transcripts nor their directory are read"""
+    if args.session and window.start is None:
+        period = L("cała sesja", "the whole session")
+    else:
+        period = period_label(window.start, window.end, window.last_n, window.rolling)
+    prev_start = previous_window_start(window) if args.diff else None
+    prev_label = period_label(prev_start, window.start) if prev_start is not None else ""
+    print("\n".join(describe_dry_run(
+        plan, period, prev_label, session=args.session, html=args.html, md=args.md,
+        private=args.private, root=root.replace(os.path.expanduser("~"), "~", 1))))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     argv = sys.argv[1:] if argv is None else list(argv)
     i18n.set_lang(i18n.detect_lang(argv))  # an invalid value is reported by argparse below
@@ -260,6 +289,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "settings are already default (no saved configuration file)"))
         return
     root = args.dir or default_root()
+    if args.dry_run:
+        _dry_run(args, plan, _window(ap, args), root)
+        return
     if not os.path.isdir(root):
         sys.exit(L(f"brak katalogu {root} — czy Claude Code był tu używany? (--dir)",
                    f"no directory {root} — has Claude Code been used here? (--dir)"))
@@ -278,12 +310,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         session_key, files = found
         session_label = session_key[1][:8]
 
-    try:
-        window = resolve_window(args)
-    except ValueError as e:
-        ap.error(str(e))
-    if args.session and not picked_options(args):
-        window.start, window.first = None, None  # a session report covers the whole session
+    window = _window(ap, args)
     start, end = window.start, window.end
 
     prev_start = previous_window_start(window) if args.diff else None

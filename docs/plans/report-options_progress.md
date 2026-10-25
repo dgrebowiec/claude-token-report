@@ -232,3 +232,34 @@ Plan: [report-options.md](report-options.md)
   `--session` z `--diff` to błąd od kroku 1 (także z okresem), więc jedynym nowym błędem jest `--all --diff`.
   `--rolling` / ułamkowe `--days` mają poprzednie okno; poprzedni okres bez wywołań daje porównanie z zerami
   (widoczne), nie cichy brak.
+
+## 2026-10-25 — Krok 6: `--dry-run`: co pokaże raport, bez liczenia
+
+- Status: DONE.
+- Zrobione:
+  - `cli.py`: flaga `--dry-run` (grupa „wyjście”); `_window` (wspólne `resolve_window` + „cała sesja” dla
+    `--session` bez okresu, używane przez raport i `--dry-run`); `_dry_run` — po `resolve` i `resolve_window`,
+    przed sprawdzeniem katalogu, `find_session` i `load`; drukuje i kończy.
+  - `options.py`: `describe_dry_run(plan, period, prev_label, session, html, md, private, root, config_path)` —
+    okres, zakres, elementy z pochodzeniem (`_origin_label` z `plan.origin` / `plan.base` / `plan.only`),
+    tabele (przy `long` — elementy bez tabel z `ELEMENT_INFO`), modyfikatory (`--diff` z poprzednim okresem
+    i `uncompared`, `--daily`), wyjście, katalog; na końcu linie `describe_plan` (ta sama stopka co w raporcie).
+    `report_options` zna `--dry-run` (osobne polecenie + `--dry-run` → błąd z kroku 1).
+  - Testy: `DryRunTest` w `tests/test_options.py` (6 testów; `load`, `find_session`, `recent_sessions`
+    podmienione na funkcję kończącą test błędem, `--dir` na nieistniejący katalog), `--dry-run` dopisany do
+    macierzy osobnych poleceń.
+  - `docs/references/report-options.md`: sekcja `--dry-run` z dwoma przykładami, `--dry-run` na liście opcji raportu, testy.
+- Decyzja: `--dry-run` nie sprawdza katalogu transkryptów i nie szuka sesji (`--session ID` → „szukana dopiero
+  przy raporcie”) — zgodnie z zaleceniem planu; wynik podaje katalog z dopiskiem „(nie sprawdzano)”. Błędy
+  opcji i okresu (kod 2) działają jak zwykle.
+- Weryfikacja:
+  - `python3 -m unittest` — 110 testów OK (było 104).
+  - Ręcznie (`CLAUDE_TOKEN_REPORT_CONFIG` w scratchpadzie: nieistniejący albo
+    `{"level":"compact","elements":["activities","sessions","skills"]}`): `--short --bash --diff --dry-run`;
+    konfiguracja + `-l pl --bash --long --daily --dry-run`; `--html X --private --dry-run --dir /nieistniejacy`
+    (kod 0, plik nie powstał); `--session --only models,cache --bash --long --md Y --dry-run`;
+    `--days 2 --rolling --diff --dry-run`; `--list --dry-run`, `--all --diff --dry-run`, `--days 0 --dry-run` → kod 2.
+  - Stopka z `--short --bash --diff --dry-run` identyczna (diff) ze stopką prawdziwego raportu
+    `--short --bash --diff`. Zwykły raport bez `--dry-run` działa jak przedtem; `--dir /nieistniejacy`
+    bez `--dry-run` dalej kończy się błędem o braku katalogu.
+- Odstępstwa: brak. Kolorów w wyniku `--dry-run` nie ma (zwykły tekst, także w terminalu).

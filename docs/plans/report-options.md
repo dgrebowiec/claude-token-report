@@ -9,7 +9,7 @@
 | 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | DONE |
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | DONE |
 | 5 | Stopka „Ustawienia tego raportu” | DONE |
-| 6 | `--dry-run`: co pokaże raport, bez liczenia | TODO |
+| 6 | `--dry-run`: co pokaże raport, bez liczenia | DONE |
 | 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | TODO |
 | 8 | README i dokumentacja opcji | TODO |
 
