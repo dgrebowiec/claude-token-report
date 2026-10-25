@@ -189,7 +189,7 @@ def session_detail(key: SessionKey, calls: List[Call], meta: Optional[SessionMet
             f.weighted += call.weighted * share
 
     rebuilds = SessionRebuilds()
-    for _call, gap, waste in iter_rebuilds(calls):
+    for _call, _prev, gap, waste, _ttl in iter_rebuilds(calls):
         rebuilds.count += 1
         rebuilds.waste += waste
         rebuilds.longest_gap = max(rebuilds.longest_gap, gap)

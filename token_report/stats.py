@@ -36,11 +36,17 @@ class Bucket:
     weighted: float = 0.0
     raw: float = 0.0
     calls: int = 0
+    context: float = 0.0  # sum of the calls' context sizes
 
-    def add(self, weighted: float, raw: float) -> None:
+    def add(self, weighted: float, raw: float, context: float = 0.0) -> None:
         self.weighted += weighted
         self.raw += raw
         self.calls += 1
+        self.context += context
+
+    @property
+    def avg_context(self) -> float:
+        return self.context / self.calls if self.calls else 0.0
 
 
 @dataclass
@@ -84,6 +90,8 @@ class SessionStats:
     long_calls: int = 0  # main-conversation calls with context >= LONG_CONTEXT
     long_weighted: float = 0.0
     compactions: int = 0
+    writes_5m: int = 0  # cache writes with the 5-minute lifetime
+    writes_1h: int = 0  # cache writes with the 1-hour lifetime
 
 
 class RebuildEvent(NamedTuple):
@@ -92,6 +100,16 @@ class RebuildEvent(NamedTuple):
     file_key: FileKey
     context: int
     gap_minutes: float
+    cause: str
+
+
+# why an expired cache was rewritten (keys of Rebuilds.by_cause)
+CAUSE_MODEL = "model"  # the model changed since the previous call
+CAUSE_COMPACT = "compact"  # the conversation was compacted in between
+CAUSE_EXPIRED = "expired"  # the pause was longer than the cache lifetime
+CAUSE_OTHER = "other"  # none of the above: the transcript does not say
+CAUSES = (CAUSE_MODEL, CAUSE_COMPACT, CAUSE_EXPIRED, CAUSE_OTHER)
+TTL_MINUTES = {"5m": 5, "1h": 60}
 
 
 def gap_bucket(minutes: float) -> str:
@@ -112,6 +130,9 @@ class Rebuilds:
     waste: float = 0.0
     top: List[RebuildEvent] = field(default_factory=list)
     by_gap: Counter[str] = field(default_factory=collections.Counter)
+    by_cause: Counter[str] = field(default_factory=collections.Counter)
+    waste_by_cause: DefaultDict[str, float] = field(
+        default_factory=lambda: collections.defaultdict(float))
     by_session: DefaultDict[SessionKey, SessionRebuilds] = field(
         default_factory=lambda: collections.defaultdict(SessionRebuilds))
 
@@ -164,6 +185,10 @@ class Stats:
     hotspots_hidden: bool = False  # --private: symbol and file names would reveal the project
     n_sessions: int = 0
     n_subagents: int = 0
+    turns: int = 0  # prompts typed by the user in the sessions of the period
+    overhead_tokens: float = 0.0  # median context of a conversation's first call: the fixed part
+    overhead_weighted: float = 0.0  # weight of re-reading that fixed part in every call
+    ttl_sessions: Counter[str] = field(default_factory=collections.Counter)  # "5m" / "1h" / "mixed"
 
     @property
     def raw(self) -> int:
@@ -215,16 +240,22 @@ def aggregate(calls: List[Call], sessions: Mapping[SessionKey, SessionMeta],
     for call in calls:
         _add_call(stats, call, sessions, namer)
         by_file[call.file_key].append(call)
-    stats.rebuilds = _find_rebuilds(by_file)
+    stats.rebuilds = _find_rebuilds(by_file, sessions)
     for key, sess in stats.by_session.items():
         meta = sessions.get(key)
         sess.compactions = len(meta.compactions) if meta else 0
+        if meta:
+            stats.turns += sum(1 for p in meta.prompts if p.kind == "prompt")
+        ttl = _ttl_kind(sess)
+        if ttl:
+            stats.ttl_sessions[ttl] += 1
         if sess.long_calls:
             lc = stats.long_context
             lc.sessions += 1
             lc.calls += sess.long_calls
             lc.weighted += sess.long_weighted
             lc.uncompacted_sessions += not sess.compactions
+    stats.overhead_tokens, stats.overhead_weighted = _overhead(calls)
     stats.rereads = _find_rereads(by_file, sessions, namer)
     if hotspots:
         stats.hotspots_hidden = namer.private
@@ -248,11 +279,11 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
     stats.by_model[call.model].add(w, raw)
     project = namer.project(sessions.get(call.session_key), call.session_key[0])
     stats.by_project[project].add(w, raw)
-    stats.by_side["sub" if call.is_subagent else "main"].add(w, raw)
+    stats.by_side["sub" if call.is_subagent else "main"].add(w, raw, call.context)
     if call.is_subagent:
         agent_type = namer.agent_type(call.agent_type) if call.agent_type \
             else L("(nieznany typ)", "(unknown type)")
-        stats.by_agent_type[agent_type].add(w, raw)
+        stats.by_agent_type[agent_type].add(w, raw, call.context)
 
     loc = call.time.astimezone()
     day = stats.by_day[f"{loc:%Y-%m-%d} {weekday(loc.date())}"]
@@ -275,6 +306,8 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
     s.weighted += w
     s.raw += raw
     s.calls += 1
+    s.writes_5m += call.tokens["cache_write_5m"]
+    s.writes_1h += call.tokens["cache_write_1h"]
     if call.is_subagent:
         s.subagent_weighted += w
     else:
@@ -284,36 +317,93 @@ def _add_call(stats: Stats, call: Call, sessions: Mapping[SessionKey, SessionMet
             s.long_weighted += w
 
 
-def iter_rebuilds(calls: Iterable[Call]) -> Iterator[Tuple[Call, float, float]]:
-    """(call, minutes since the previous call of the same file, extra weight) for every call
-    where an expired cache made most of the context be written again"""
+def iter_rebuilds(calls: Iterable[Call]) -> Iterator[Tuple[Call, Call, float, float, float]]:
+    """(call, previous call of the same file, minutes between them, extra weight, lifetime of
+    the cache in minutes) for every call where an expired cache made most of the context be
+    written again"""
     by_file: DefaultDict[FileKey, List[Call]] = collections.defaultdict(list)
     for call in calls:
         by_file[call.file_key].append(call)
     for file_calls in by_file.values():
+        ttl = TTL_MINUTES["5m"]  # of the last cache write; reads renew it but do not change it
         for prev, call in zip(file_calls, file_calls[1:]):
+            if prev.tokens["cache_write_1h"]:
+                ttl = TTL_MINUTES["1h"]
+            elif prev.tokens["cache_write_5m"]:
+                ttl = TTL_MINUTES["5m"]
             written = call.tokens["cache_write_5m"] + call.tokens["cache_write_1h"]
             if call.context < MIN_REBUILD_CTX or written < 0.5 * call.context:
                 continue
             gap = (call.time - prev.time).total_seconds() / 60
-            yield call, gap, cache_rewrite_waste(call.tokens, call.model)
+            yield call, prev, gap, cache_rewrite_waste(call.tokens, call.model), ttl
 
 
-def _find_rebuilds(by_file: Mapping[FileKey, List[Call]]) -> Rebuilds:
+def rebuild_cause(prev: Call, call: Call, compactions: List[datetime.datetime],
+                  ttl: float) -> str:
+    """what made the cache miss: the transcript shows the model and compactions, and the pause
+    against the lifetime of the cache; the rest changed the start of the conversation"""
+    if prev.model != call.model:
+        return CAUSE_MODEL
+    if any(prev.time < t <= call.time for t in compactions):
+        return CAUSE_COMPACT
+    if (call.time - prev.time).total_seconds() / 60 > ttl:
+        return CAUSE_EXPIRED
+    return CAUSE_OTHER
+
+
+def _find_rebuilds(by_file: Mapping[FileKey, List[Call]],
+                   sessions: Mapping[SessionKey, SessionMeta]) -> Rebuilds:
     """expired cache: the context was mostly written again instead of read from the cache"""
     out = Rebuilds()
-    for call, gap, waste in iter_rebuilds(c for calls in by_file.values() for c in calls):
+    all_calls = (c for calls in by_file.values() for c in calls)
+    for call, prev, gap, waste, ttl in iter_rebuilds(all_calls):
+        meta = sessions.get(call.session_key)
+        compactions = [t for t, _ in meta.compactions] if meta else []
+        cause = rebuild_cause(prev, call, compactions, ttl)
         out.count += 1
         out.waste += waste
         out.by_gap[gap_bucket(gap)] += 1
+        out.by_cause[cause] += 1
+        out.waste_by_cause[cause] += waste
         s = out.by_session[call.session_key]
         s.count += 1
         s.waste += waste
         s.longest_gap = max(s.longest_gap, gap)
-        out.top.append(RebuildEvent(waste, call.time, call.file_key, call.context, gap))
+        out.top.append(RebuildEvent(waste, call.time, call.file_key, call.context, gap, cause))
     out.top.sort(key=lambda e: -e.waste)
     out.top = out.top[:TOP_REBUILDS]
     return out
+
+
+def _ttl_kind(s: SessionStats) -> Optional[str]:
+    """the cache lifetime a session's writes mostly used, None when it wrote nothing"""
+    total = s.writes_5m + s.writes_1h
+    if not total:
+        return None
+    if s.writes_1h >= 0.9 * total:
+        return "1h"
+    if s.writes_5m >= 0.9 * total:
+        return "5m"
+    return "mixed"
+
+
+def _overhead(calls: List[Call]) -> Tuple[float, float]:
+    """(median context of the first call of a main conversation, weight of re-reading that part
+    in every call): the fixed part is system prompt, tools, CLAUDE.md and the skill list"""
+    first: Dict[FileKey, Call] = {}
+    for call in calls:
+        if not call.is_subagent and call.file_key[2] is None:
+            first.setdefault(call.file_key, call)
+    if not first:
+        return 0.0, 0.0
+    contexts = sorted(c.context for c in first.values())
+    median = float(contexts[len(contexts) // 2])
+    reread = 0.0
+    for call in calls:
+        if call.context and not call.is_subagent and call.file_key[2] is None:
+            share = min(1.0, median / call.context)
+            reread += call.weighted_by_type["cache_read"] * share
+    return median, reread
 
 
 def _read_range(tool_input: Mapping) -> Tuple[float, float]:

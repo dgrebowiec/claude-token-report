@@ -115,18 +115,24 @@ class ProjectHotspots:
     def missing(self) -> List[Item]:
         return [i for i in self.files + self.symbols if not i.documented and not i.linked]
 
-    def draft(self) -> List[str]:
-        """lines to paste into CLAUDE.md: the undocumented files and symbols (a symbol together
-        with the file named after it)"""
+    def draft_groups(self) -> Tuple[List[str], List[str]]:
+        """lines to paste into CLAUDE.md, as (files, symbols): the undocumented ones (a symbol
+        together with the file named after it)"""
         missing = self.missing()
         with_symbol = {i.path for i in missing if i.path}
-        lines = []
+        files, symbols = [], []
         for item in missing:
             if item.path:
-                lines.append(f"- `{item.name}` — `{item.path}` — …")
+                symbols.append(f"- `{item.name}` — `{item.path}` — …")
+            elif any(item is i for i in self.symbols):
+                symbols.append(f"- `{item.name}` — …")
             elif item.name not in with_symbol:
-                lines.append(f"- `{item.name}` — …")
-        return lines
+                files.append(f"- `{item.name}` — …")
+        return files, symbols
+
+    def draft(self) -> List[str]:
+        files, symbols = self.draft_groups()
+        return files + symbols
 
 
 @dataclass

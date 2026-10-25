@@ -18,6 +18,7 @@ from .naming import Namer
 from .periods import (Window, midnight, parse_day, period_label, picked_options,
                       previous_window_start, resolve_window)
 from .report_html import html_report
+from .report_md import md_report
 from .report_text import session_list, text_daily, text_diff, text_report
 from .session_detail import session_detail
 from .stats import aggregate
@@ -145,6 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("wszystkie sekcje i dłuższe tabele", "every section and longer tables"))
     g = ap.add_argument_group(L("wyjście", "output"))
     g.add_argument("--html", metavar=L("PLIK", "FILE"), help=L("zapisz raport HTML", "write an HTML report"))
+    g.add_argument("--md", metavar=L("PLIK", "FILE"),
+                   help=L("zapisz raport jako Markdown do analizy przez Claude'a (domyślnie z pełnym "
+                          "szczegółem)",
+                          "write the report as Markdown for Claude to analyze (full detail by default)"))
     g.add_argument("--private", action="store_true",
                    help=L("ukryj nazwy projektów, plików i treść próśb (do udostępniania)",
                           "hide project/file names and prompt text (for sharing)"))
@@ -155,11 +160,19 @@ def build_parser() -> argparse.ArgumentParser:
                           "interactively pick the detail level (minimal / normal / detailed) and "
                           "the report elements; the saved choice applies when you pass no "
                           "section flags"))
+    g.add_argument("--reset-config", action="store_true",
+                   help=L("przywróć domyślne ustawienia raportu (usuwa plik konfiguracji)",
+                          "reset report configuration to defaults (removes configuration file)"))
     g.add_argument("--no-config", action="store_true",
                    help=L("zignoruj zapisane ustawienia (--configure) w tym uruchomieniu",
                           "ignore the saved settings (--configure) for this run"))
     g.add_argument("--explain", action="store_true",
                    help=L("wyjaśnij tokeny surowe i ważone", "explain raw and weighted tokens"))
+    g.add_argument("--color", dest="color", action="store_true", default=None,
+                   help=L("wymuś kolory w terminalu (np. dla less -R)",
+                          "force terminal colors (e.g. for less -R)"))
+    g.add_argument("--no-color", dest="color", action="store_false",
+                   help=L("wyłącz kolory w terminalu", "disable terminal colors"))
     g.add_argument("--lang", "-l", choices=list(i18n.SUPPORTED), default="en",
                    help=L("język: en (domyślnie) lub pl", "language: en (default) or pl"))
     g.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
@@ -167,6 +180,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help=L("katalog transkryptów (domyślnie ~/.claude/projects)",
                           "transcripts dir (default ~/.claude/projects)"))
     return ap
+
+
+def _use_color(flag: Optional[bool]) -> bool:
+    if flag is not None:
+        return flag
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty() and os.environ.get("TERM") != "dumb"
 
 
 def _load_from(window: Window, args: argparse.Namespace,
@@ -195,7 +218,7 @@ def _saved_settings(args: argparse.Namespace) -> Optional[settings_module.Settin
     return None if own or args.no_config else settings_module.load()
 
 
-def _write_html(path: str, page: str, n_calls: int, weighted: float) -> None:
+def _write_file(path: str, page: str, n_calls: int, weighted: float) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
     print(L(f"zapisano {path}  ({n_calls} wywołań, {fmt_tok(weighted)} tokenów ważonych)",
@@ -212,11 +235,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ap = build_parser()
     args = ap.parse_args(argv)
 
+    color = _use_color(args.color)
     if args.explain:
-        print(explain_text())
+        print(explain_text(color=color))
         return
     if args.configure:
         configure.main()
+        return
+    if args.reset_config:
+        cfg = settings_module.settings_path()
+        if cfg.is_file():
+            cfg.unlink()
+            print(L(f"przywrócono ustawienia domyślne (usunięto {cfg})",
+                    f"restored default settings (removed {cfg})"))
+        else:
+            print(L("ustawienia są już domyślne (brak zapisanego pliku konfiguracji)",
+                    "settings are already default (no saved configuration file)"))
         return
     root = args.dir or default_root()
     if not os.path.isdir(root):
@@ -225,7 +259,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     namer = Namer(args.private)
 
     if args.list:
-        print(session_list(root, recent_sessions(root, args.list), namer))
+        print(session_list(root, recent_sessions(root, args.list), namer, color=color))
         return
 
     files, session_key, session_label = None, None, None
@@ -266,6 +300,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         ctx.only_chosen = True
         ctx.sections = frozenset(k for k in SECTIONS if k in shown)
         ctx.core = frozenset(k for k in settings_module.CORE if k in shown)
+    if args.md and not (saved or ctx.short or ctx.sections):
+        ctx.full = True  # an analysis wants all the data
     if session_key:
         ctx.detail = session_detail(session_key, current, sessions.get(session_key), namer)
     stats = aggregate(current, sessions, namer)
@@ -277,16 +313,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     daily = _daily_rows(window, calls, current) if args.daily else None
 
     if args.html:
-        _write_html(args.html, html_report(stats, ctx, prev_stats, daily),
+        _write_file(args.html, html_report(stats, ctx, prev_stats, daily),
                     stats.n_calls, stats.weighted)
+    if args.md:
+        _write_file(args.md, md_report(stats, ctx, prev_stats, daily),
+                    stats.n_calls, stats.weighted)
+    if args.html or args.md:
         return
     if prev_stats is not None:
-        print(text_diff(stats, prev_stats, ctx))
+        print(text_diff(stats, prev_stats, ctx, color=color))
         print()
     if daily:
-        print(text_daily(daily))
+        print(text_daily(daily, color=color))
         print()
-    print(text_report(stats, ctx))
+    print(text_report(stats, ctx, color=color))
 
 
 def run() -> None:

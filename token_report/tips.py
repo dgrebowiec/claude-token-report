@@ -54,11 +54,11 @@ def tips(stats: Stats, ctx: Optional["ReportContext"] = None) -> List[str]:
     if rb.count and pct(rb.waste, total) > REBUILD_WASTE_PCT:
         out.append(L(
             f"Wygasły cache: {rb.count} razy cała rozmowa była zapisywana od nowa (zwykle po "
-            f"przerwie dłuższej niż 5 minut). To {pct(rb.waste, total):.0f}% zużycia, którego "
+            f"przerwie dłuższej niż czas życia cache: 5 minut lub godzina). To {pct(rb.waste, total):.0f}% zużycia, którego "
             f"dało się uniknąć. Przed dłuższą przerwą dokończ wątek, a po powrocie do starej "
             f"rozmowy rozważ /compact albo /clear.{hint('cache', '--cache')}",
             f"Expired cache: {rb.count} times the whole conversation was written again (usually "
-            f"after a break of more than 5 minutes). That is {pct(rb.waste, total):.0f}% of "
+            f"after a break of more than the cache lifetime: 5 minutes or an hour). That is {pct(rb.waste, total):.0f}% of "
             f"usage that could have been avoided. Finish the thread before a long break, and "
             f"consider /compact or /clear when you return to an old conversation.{hint('cache', '--cache')}"))
 

@@ -33,14 +33,24 @@ def short(name: str, width: int) -> str:
     return "…" + name[-(width - 1):]
 
 
+def short_right(name: str, width: int) -> str:
+    """shortens a label from the right with an ellipsis when it exceeds width"""
+    if len(name) <= width:
+        return name
+    return name[:width - 1].rstrip() + "…"
+
+
 def home_relative(path: str) -> str:
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
 
 
 def bar(frac: float, width: int = 24) -> str:
-    full = int(round(max(0.0, min(1.0, frac)) * width))
-    return "#" * full + "." * (width - full)
+    clamped = max(0.0, min(1.0, frac))
+    full = int(round(clamped * width))
+    if full == 0 and clamped >= 0.005 and width >= 1:
+        return "▌" + "·" * (width - 1)
+    return "█" * full + "·" * (width - full)
 
 
 def fmt_change(cur: float, prev: float) -> str:

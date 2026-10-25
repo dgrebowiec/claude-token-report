@@ -76,9 +76,11 @@ CO ZNACZĄ LICZBY W TYM RAPORCIE
      /compact  zastępuje rozmowę krótkim podsumowaniem.
 
 8. WYGASŁY CACHE
-   Cache trzyma rozmowę przez 5 minut (czasem godzinę) od ostatniego użycia.
-   Po dłuższej przerwie następne wywołanie musi zapisać CAŁĄ rozmowę od nowa
-   (x1.25 zamiast x0.1, czyli 12.5 raza więcej za ten sam tekst).
+   Cache trzyma rozmowę od ostatniego użycia: 5 minut albo 1 godzinę, zależnie
+   od zapisu. Po dłuższej przerwie następne wywołanie
+   musi zapisać CAŁĄ rozmowę od nowa (x1.25 przy cache 5-minutowym, x2 przy
+   1-godzinnym, zamiast odczytu x0.1 - w nowszych modelach x0.05 lub mniej -
+   czyli od 12.5 do 80 razy więcej za ten sam tekst).
 
 9. JAK LICZONE SĄ CZYNNOŚCI („na co idą tokeny”)
    Każde wywołanie jest przypisane do narzędzia, którego model w nim użył
@@ -171,10 +173,11 @@ WHAT THE NUMBERS IN THIS REPORT MEAN
      /compact  replaces the conversation with a short summary.
 
 8. EXPIRED CACHE
-   The cache keeps the conversation for 5 minutes (sometimes an hour) after
-   its last use. After a longer break the next call has to write the WHOLE
-   conversation again (x1.25 instead of x0.1, i.e. 12.5x more for the same
-   text).
+   The cache keeps the conversation after its last use: 5 minutes or 1 hour,
+   depending on the write. After a longer break
+   the next call has to write the WHOLE conversation again (x1.25 for the
+   5-minute cache, x2 for the 1-hour one, instead of a read at x0.1 - x0.05
+   or less in newer models - i.e. 12.5x to 80x more for the same text).
 
 9. HOW ACTIVITIES ARE COUNTED ("where the tokens go")
    Each call is assigned to the tool the model used in it (Read, Edit,
@@ -196,5 +199,18 @@ token_report/pricing.py (as of 2026-09).
 """
 
 
-def explain_text() -> str:
-    return L(EXPLAIN_PL, EXPLAIN_EN)
+def explain_text(color: bool = False) -> str:
+    text = L(EXPLAIN_PL, EXPLAIN_EN)
+    if not color:
+        return text
+    lines = []
+    for i, line in enumerate(text.splitlines()):
+        if i == 0:
+            lines.append(f"\033[1;36m{line}\033[0m")
+        elif line.startswith("==="):
+            lines.append(f"\033[36m{'═' * len(line)}\033[0m")
+        elif line and line[0].isdigit() and ". " in line[:5]:
+            lines.append(f"\033[1;36m{line}\033[0m")
+        else:
+            lines.append(line)
+    return "\n".join(lines) + "\n"

@@ -4,7 +4,7 @@ import unittest
 
 from token_report import i18n
 from token_report.classify import NO_TOOL, classify_bash, classify_tool
-from token_report.formatting import arrow, fmt_change, fmt_tok, short
+from token_report.formatting import arrow, bar, fmt_change, fmt_tok, short, short_right
 from token_report.naming import Namer
 from token_report.periods import parse_day, resolve_window
 from token_report.pricing import model_weight, split_usage, weighted_by_type
@@ -108,6 +108,14 @@ class FormattingTest(unittest.TestCase):
     def test_short(self):
         self.assertEqual(short("abc", 5), "abc")
         self.assertEqual(short("~/projects/some-long-name", 10), "…long-name")
+        self.assertEqual(short_right("abc", 5), "abc")
+        self.assertEqual(short_right("some-long-name", 10), "some-long…")
+
+    def test_bar(self):
+        self.assertEqual(bar(0.0, 4), "····")
+        self.assertEqual(bar(0.02, 4), "▌···")
+        self.assertEqual(bar(0.5, 4), "██··")
+        self.assertEqual(bar(1.0, 4), "████")
 
 
 def _args(**kw):

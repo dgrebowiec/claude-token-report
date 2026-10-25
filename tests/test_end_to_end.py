@@ -171,6 +171,11 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("fix the login bug", out)
         self.assertIn("Explore", out)
         self.assertIn("such calls: 1", out)
+        self.assertNotIn("\033[", out)
+        colored = self.run_cli("--all", "--color")
+        self.assertIn("\033[1;36m", colored)
+        plain = self.run_cli("--all", "--no-color")
+        self.assertNotIn("\033[", plain)
 
     def test_private_hides_names(self):
         out = self.run_cli("--all", "--private", "--full")
@@ -316,6 +321,33 @@ class EndToEndTest(unittest.TestCase):
             data = json.load(f)
         self.assertEqual(data["level"], "minimal")
         self.assertEqual(data["elements"], ["activities", "models", "sessions", "tips", "time"])
+
+    def test_configure_section_preview_and_reset(self):
+        from token_report import configure
+        preview_act = configure.section_preview("activities", "normal", color=False)
+        self.assertTrue(any("NA CO IDĄ TOKENY" in line or "WHERE THE TOKENS GO" in line for line in preview_act))
+        preview_omitted = configure.section_preview("bash", "minimal", color=False)
+        self.assertTrue(any("pomijana" in line or "omitted" in line for line in preview_omitted))
+
+        # Test restoring defaults with 'd'
+        self.save_settings("detailed", ["bash", "skills"])
+        answers = iter(["d", "w"])
+        saved = configure.run(__import__("pathlib").Path(self.config), ask=lambda _p: next(answers),
+                              out=lambda _t: None)
+        with open(self.config, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["level"], "normal")
+        self.assertEqual(data["elements"], ["activities", "models", "sessions", "tips"])
+
+    def test_cli_reset_config(self):
+        self.save_settings("detailed", ["bash"])
+        self.assertTrue(os.path.exists(self.config))
+        out = self.run_cli("--reset-config")
+        self.assertIn("default", out.lower())
+        self.assertFalse(os.path.exists(self.config))
+        # Second call when already default
+        out2 = self.run_cli("--reset-config")
+        self.assertIn("already default", out2.lower())
 
 
 if __name__ == "__main__":

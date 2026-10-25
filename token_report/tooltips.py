@@ -23,9 +23,11 @@ HELP = {  # tooltip texts for the "?" marks in the HTML report: key -> (pl, en)
                  "read x0.1, new text x1, cache write x1.25, output x5, times the model weight "
                  "(Opus 5 x1, Sonnet 5 x0.4). Ratios taken from Anthropic's API pricing."),
     "hit": ("Jaka część rozmowy była tanim powtórnym odczytem z cache. Powyżej ~90% to dobry "
-            "wynik; spadki = przerwy dłuższe niż 5 min albo zmiana modelu.",
+            "wynik; spadki = przerwy dłuższe niż czas życia cache (5 min lub 1 h) "
+            "albo zmiana modelu.",
             "How much of the conversation was cheap re-reading from cache. Above ~90% is good; "
-            "drops = breaks over 5 minutes or a model switch."),
+            "drops = breaks longer than the cache lifetime (5 minutes or 1 hour) "
+            "or a model switch."),
     "avgcall": ("Ile tokenów ważonych zużywa średnio jedno wywołanie modelu.",
                 "How many weighted tokens one model call uses on average."),
     "weight": ("Mnożnik rodzaju tokenu z cennika API: odczyt z cache kosztuje 10% zwykłego "
@@ -103,11 +105,13 @@ HELP = {  # tooltip texts for the "?" marks in the HTML report: key -> (pl, en)
                "How large (in tokens) the main conversation grew."),
     "subshare": ("Jaka część zużycia tej sesji przypadła na subagentów.",
                  "The share of this session's usage spent by subagents."),
-    "rebuild": ("Cache trzyma rozmowę 5 minut (lub godzinę). Po dłuższej przerwie model "
-                "zapisuje całą rozmowę od nowa (x1.25) zamiast ją odczytać (x0.1). Liczone, gdy "
-                "rozmowa ma ≥20k tokenów i ≥50% z niej zapisano.",
-                "The cache keeps the conversation for 5 minutes (or an hour). After a longer "
-                "break the model writes it all again (x1.25) instead of reading it (x0.1). "
+    "rebuild": ("Cache trzyma rozmowę 5 minut albo godzinę, zależnie od zapisu. "
+                "Po dłuższej przerwie model zapisuje całą rozmowę od nowa (x1.25 lub x2) zamiast "
+                "ją odczytać (x0.1 lub mniej). Liczone, gdy rozmowa ma ≥20k tokenów i ≥50% z niej "
+                "zapisano.",
+                "The cache keeps the conversation for 5 minutes or an hour, "
+                "depending on the write. After a longer break the model writes it all again "
+                "(x1.25 or x2) instead of reading it (x0.1 or less). "
                 "Counted when the conversation is ≥20k tokens and ≥50% of it was written."),
     "waste": ("O ile więcej zużyły te odbudowy niż zwykły odczyt z cache.",
               "How much more those rebuilds used than a normal cache read."),

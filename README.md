@@ -202,10 +202,29 @@ Real usage from one week, with project names, file names and prompts hidden (`--
    spent by subagents. One session in detail: --session <id>
 
 -- EXPIRED CACHE — conversation written again ----------------------------------------------
-   The cache keeps the conversation for 5 minutes (sometimes an hour) after its last use.
-   After a longer break the model has to write the whole conversation again (weight x1.25)
-   instead of reading it cheaply (x0.1).
+   The cache keeps the conversation for 5 minutes or 1 hour after its last use (the
+   transcript records which). After a longer break the model writes the whole conversation
+   again instead of reading it:
+     write, 5 min cache   x1.25
+     write, 1 h cache     x2
+     read (both)          x0.1, x0.05 or less in newer models
+
  such calls: 67   extra usage: 12.9M (15.1% of the total)
+
+ pause before the rewrite:
+    < 5 min    10
+    5-60 min   40
+    > 60 min   17
+   A pause shorter than the cache lifetime ('< 5 min', and with the 1 h cache also '5-60
+   min') means time did not cause the rewrite (e.g. a model switch or a change in an
+   earlier part of the conversation). The pause is counted from the previous call of the
+   same conversation file.
+
+ sessions with the most rewrites:
+    d59ca19f   10×  extra   2.7M  longest pause  1203 min
+    518f740c    5×  extra   1.5M  longest pause    67 min
+
+ largest single events:
     2026-09-20 20:05  d59ca19f  ctx  435k  gap   67 min  extra 767k
     2026-09-19 15:23  518f740c  ctx  410k  gap 1662 min  extra 737k
     2026-09-23 08:11  f2aff469  ctx  410k  gap  234 min  extra 736k
@@ -226,7 +245,7 @@ Real usage from one week, with project names, file names and prompts hidden (`--
    them weighs more than a call in a short conversation (~4.7x). Start unrelated tasks with
    /clear and shorten long work with /compact.
  * Expired cache: 67 times the whole conversation was written again (usually after a break
-   of more than 5 minutes). That is 15% of usage that could have been avoided. Finish the
+   of more than the cache lifetime: 5 minutes or an hour). That is 15% of usage that could have been avoided. Finish the
    thread before a long break, and consider /compact or /clear when you return to an old
    conversation.
  * Searching and reading code is 47% of usage. Name concrete files or functions in your
@@ -287,6 +306,7 @@ python3 claude_token_report.py --list           # recent sessions
 python3 claude_token_report.py --session 1a2b   # one session in detail (no value = the latest)
 python3 claude_token_report.py --session 1a2b --short    # only the session details and phases
 python3 claude_token_report.py --html report.html --private   # shareable HTML, no names or prompts
+python3 claude_token_report.py --md report.md --daily            # Markdown for Claude to analyze (full detail, with task and glossary)
 ```
 
 Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM-DD` (current year), `today`, `yesterday`.
@@ -381,24 +401,26 @@ will contain:
 
 | Key | Action |
 | --- | --- |
-| `↑` `↓` (or `k` `j`) | select an element |
+| `↑` `↓` (or `k` `j`) | select an element (live preview updates below) |
 | `space` (or a digit `1`-`9`, `0`) | show / hide the element |
-| `←` `→` | detail level: `minimal`, `normal`, `detailed` |
+| `←` `→` | detail level: `minimal`, `normal`, `detailed` (preview reflects level) |
 | `a` / `n` | all elements / none |
-| `r` | reset to defaults |
+| `r` / `d` | reset to defaults |
 | `enter` | save and exit |
 | `q` / `Esc` | quit (asks again if there are unsaved changes) |
 
 Levels: `minimal` is the `--short` report (only activities, models and heaviest conversations
 can be chosen), `normal` the default one, `detailed` has the long tables of `--full`. Elements:
 `activities`, `models`, `sessions`, `tips`, plus the optional sections `time`, `breakdown`,
-`cache`, `bash`, `skills`, `map`. When stdin is not a terminal it falls back to text commands,
-one per line (`<n>` toggles, `l` level, `a`, `n`, `r`, `w` save, `q` quit).
+`cache`, `bash`, `skills`, `map`. The editor displays a live preview of the currently selected
+section according to the selected detail level. When stdin is not a terminal it falls back to text commands,
+one per line (`<n>` toggles, `l` level, `a`, `n`, `r` / `d` defaults, `w` save, `q` quit).
 
 The choice is saved in `~/.claude/claude-token-report.json` (override with
 `CLAUDE_TOKEN_REPORT_CONFIG`) and applies to every text and `--html` report. Any of `--short`,
 `--full` or a section flag (`--cache`, `--bash` ...) overrides it for that run; `--no-config`
-ignores it.
+ignores it. To reset saved configuration back to defaults from the CLI, run:
+`claude-token-report --reset-config`.
 
 ## Bash noise and skills
 
@@ -427,8 +449,9 @@ only what the transcripts record, with no estimated savings:
 - **EXPIRED CACHE**: a call where most of the conversation (at least 50%, and at least 20k tokens of
   context) was written again instead of read from the cache. The report counts them, sums the extra
   weight over a normal cache read, and splits them by the pause before the call:
-  `< 5 min`, `5-60 min`, `> 60 min`. A short pause that still caused a rewrite was not caused by time
-  (for example a model switch or a change earlier in the conversation). Next come the sessions with
+  `< 5 min`, `5-60 min`, `> 60 min`. The transcripts record whether each write used the 5-minute or the 1-hour cache.
+  A pause shorter than that lifetime (`< 5 min`, and with the 1-hour cache also `5-60 min`) means the rewrite was not caused by
+  time (for example a model switch or a change earlier in the conversation). Next come the sessions with
   the most rewrites, and the largest single events.
 - **LONG CONVERSATIONS**: calls made at a context of 150k tokens or more, how many conversations
   reached that size, and how many of them were never compacted with `/compact`. It is the weighted

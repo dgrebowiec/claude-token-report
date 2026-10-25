@@ -509,7 +509,7 @@ def _rebuild_details(stats: Stats) -> str:
         rows += (f"<tr><td class=m>{E(key[1][:8])}</td><td class=n>{sr.count}</td>"
                  f"<td class=n>{fmt_tok(sr.waste)}</td><td class=n>{sr.longest_gap:.0f} min</td></tr>")
     return (f"<p class=sub>{L('Przerwa przed odbudową', 'Pause before the rewrite')}: {gaps}. "
-            f"{L('„< 5 min” to odbudowa bez wygaśnięcia z upływu czasu (np. zmiana modelu lub wcześniejszej części rozmowy).', '“< 5 min” is a rewrite that time did not cause (e.g. a model switch or a change in an earlier part of the conversation).')}</p>"
+            f"{L('Cache trwa 5 min albo 1 h. Przerwa krótsza niż jego czas życia („< 5 min”, a przy cache 1 h także „5-60 min”) to odbudowa bez wygaśnięcia z upływu czasu (np. zmiana modelu lub wcześniejszej części rozmowy).', 'The cache lasts 5 minutes or 1 hour. A pause shorter than its lifetime (“< 5 min”, and with the 1-hour cache also “5-60 min”) is a rewrite that time did not cause (e.g. a model switch or a change in an earlier part of the conversation).')}</p>"
             f"<div class=wrap><table>{rows}</table></div>")
 
 
@@ -636,11 +636,17 @@ def _project_map(stats: Stats) -> str:
         parts.append(f"<p><b>{E(home_relative(project.root))}</b> <span class=few>· {info}"
                      f"</span></p>")
         parts.append(_hotspot_table(project))
-        draft = project.draft()
-        if draft:
-            text = "\n".join([L("## Mapa projektu", "## Project map")] + draft)
-            parts.append(f"<details><summary>{L('Szkic do CLAUDE.md dla „nie znaleziono” (sprawdź, uzupełnij „…”)', 'Draft for CLAUDE.md for “not found” (check, then fill in “…”)')}"
-                         f"</summary><div class=\"card explain\">{E(text)}</div></details>")
+        files_draft, symbols_draft = project.draft_groups()
+        if files_draft or symbols_draft:
+            text = L("## Mapa projektu", "## Project map")
+            for title, lines in ((L("### Pliki", "### Files"), files_draft),
+                                 (L("### Symbole", "### Symbols"), symbols_draft)):
+                if lines:
+                    text += "\n\n" + "\n".join([title] + lines)
+            hint = L("Zamień każde „…” jednym zdaniem: po co jest plik lub co robi symbol, np. „układ szablonów reklam; tu resolveLayout”.",
+                     "Replace each “…” with one sentence: what the file is for or what the symbol does, e.g. “ad template layout; resolveLayout lives here”.")
+            parts.append(f"<details><summary>{L('Szkic do CLAUDE.md dla pozycji „nie znaleziono”', 'Draft for CLAUDE.md for the items marked “not found”')}"
+                         f"</summary><p class=sub>{hint}</p><div class=\"card explain\">{E(text)}</div></details>")
     return "\n".join(parts)
 
 
