@@ -13,7 +13,7 @@ from .formatting import (arrow, bar, fmt_change, fmt_delta, fmt_int, fmt_tok, ho
 from .hotspots import LARGE_FILE, LONG_INSTRUCTIONS, Item, column_name, limits_note, status
 from .i18n import L, weekday
 from .naming import Namer
-from .options import no_comparison_note
+from .options import describe_plan, no_comparison_note
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
 from .session_detail import SessionDetail, effort_name, fmt_duration, ultracode_text
 from .stats import (CAUSE_COMPACT, CAUSE_EXPIRED, CAUSE_MODEL, CAUSE_OTHER, CAUSES, CTX_BUCKETS,
@@ -818,11 +818,8 @@ def _skills(out: _Lines, stats: Stats, namer: Namer, rows: int = TOP_ROWS) -> No
                                   f"… and {len(unused) - rows} more")), kind="row")
 
 
-_FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache"),
-          ("bash", "--bash"), ("skills", "--skills"), ("map", "--project-map")]
-
-
-def text_report(stats: Stats, ctx: ReportContext, color: bool = False) -> str:
+def text_report(stats: Stats, ctx: ReportContext, color: bool = False,
+                footer: bool = True) -> str:
     out = _Lines(color=color)
     s = out.s
     out.rule()
@@ -864,13 +861,10 @@ def text_report(stats: Stats, ctx: ReportContext, color: bool = False) -> str:
         out.header(L("CO MOŻNA POPRAWIĆ", "WHAT YOU COULD IMPROVE"))
         for tip in tips(stats, ctx):
             out.bullet(tip)
-    out.add()
-    missing = [f for key, f in _FLAGS if not ctx.has(key)]
-    if missing:
-        out.add(" " + s.dim(L("Więcej szczegółów: ", "More detail: ") + " ".join(missing)
-                            + L("  albo --full (wszystko)", "  or --full (everything)")))
-    out.add(" " + s.dim(L("Pełne wyjaśnienie tokenów surowych i ważonych: --explain",
-                          "Full explanation of raw and weighted tokens: --explain")))
+    if footer:  # "Settings of this report" (md_report puts it at the end of the file)
+        out.add()
+        for line in describe_plan(ctx.plan, ctx.prev_label):
+            out.add(" " + s.dim(line))
     out.rule()
     return out.render()
 

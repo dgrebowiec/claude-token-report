@@ -25,6 +25,7 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 | `diff`, `daily`, `session` | modyfikatory i zakres pojedynczej sesji |
 | `origin` | element → `default` / `config` / `preset` / `flag` (skąd się wziął; `--only` = `flag`) |
 | `base` | skąd zestaw bazowy: `default` / `config` / `short` / `full` / `only` / `md` |
+| `only` | elementy podane w `--only` (dla stopki: odróżnia je od dopisanych flag sekcji) |
 | `notes` | miękkie uwagi do stopki raportu; przy `--diff` — linia „Bez porównania: …” (patrz niżej), inaczej puste |
 | `has(element)` | czy element jest w raporcie |
 
@@ -36,9 +37,8 @@ plan raportu domyślnego: rdzeń, krótkie tabele). Renderery pytają tylko o pl
 ## Jedna ścieżka renderowania
 
 `report_text.text_report` i `report_html.html_report` mają jedną ścieżkę: podsumowanie (zawsze), bloki
-pojedynczej sesji, potem każdy element planu w stałej kolejności, na końcu podpowiedź „Więcej szczegółów:
-<flagi sekcji, których nie ma w planie>” (`_FLAGS`; w HTML `_more`). Nie ma osobnego trybu „raport skrócony”
-ani jego stopki — `--short` to tylko zestaw elementów, więc:
+pojedynczej sesji, potem każdy element planu w stałej kolejności, na końcu stopka „Ustawienia tego raportu”
+(patrz niżej). Nie ma osobnego trybu „raport skrócony” ani jego stopki — `--short` to tylko zestaw elementów, więc:
 
 - `--short --bash` (i każda flaga sekcji) dopisuje sekcję do krótkiego zestawu;
 - `--short --long` wydłuża wszystkie tabele krótkiego zestawu (czynności, modele, rozmowy);
@@ -123,15 +123,73 @@ Dla `bash` poprzedni okres dostaje `waste.find_waste` w `cli.main` tylko wtedy, 
 Pod blokiem porównania jedna linia „Bez porównania: <elementy>” / „Not compared: <elementy>” — elementy
 z raportu bez porównania, nazwami jak w `--only`; pomijana, gdy lista jest pusta
 (`options.no_comparison_note`, `options.uncompared`). Ta sama linia trafia do `ReportPlan.notes`
-(dla stopki „Ustawienia tego raportu”). Przykłady:
+(stopka nie powtarza jej jako osobnej linii — patrz niżej). Przykłady:
 
 - domyślny raport + `--diff` → podsumowanie, czynności, modele; „Bez porównania: sessions, tips”;
 - `--only activities,map --diff` → podsumowanie, czynności; „Bez porównania: map”;
 - `--full --diff` → wszystkie części; „Bez porównania: sessions, tips, skills, map”;
 - `--only activities,models --diff` → bez linii „Bez porównania”.
 
-Uwaga: przy `--all` (brak początku okresu) nie ma poprzedniego okresu i bloku porównania — bez komunikatu
-(do rozstrzygnięcia w kolejnych krokach).
+`--diff` zawsze ma poprzedni okres: jedyne okresy bez niego — `--all` i `--session` bez okresu — są
+twardymi błędami (`--all --diff`, `--session --diff`, patrz „Twarde błędy”). Okno `--rolling` / ułamkowe `--days`
+ma poprzednie okno tej samej długości. Poprzedni okres bez danych daje porównanie z zerami, nie znika.
+
+## Stopka „Ustawienia tego raportu”
+
+Każdy raport kończy się stopką z `options.describe_plan(plan, prev_label, config_path=None)` — 2–3 krótkie
+linie (dwujęzyczne, `L`):
+
+1. **Ustawienia** — skąd zestaw elementów (`plan.base`), dopisane flagi sekcji (`origin == "flag"`, poza
+   `--only`), długość tabel, a gdy dotyczy: porównanie z poprzednim okresem (`ctx.prev_label`) z krótką listą
+   elementów bez porównania, „dzień po dniu”.
+2. **Więcej szczegółów** — flagi sekcji, których nie ma w raporcie, „albo --full (wszystko)”; pomijana, gdy
+   raport ma wszystkie sekcje.
+3. **Jak zmienić** — przy zestawie z konfiguracji: „Bez konfiguracji: --no-config · zmiana: --configure”, w innym
+   razie „Własny zestaw na stałe: --configure”; zawsze „tokeny surowe i ważone: --explain”.
+
+Dalej ewentualne inne `plan.notes`. Linia „Bez porównania: …” z `notes` nie jest powtarzana — raport pokazuje
+ją już pod blokiem porównania (z `--diff` blok jest zawsze), a stopka wymienia te elementy skrótowo w linii 1.
+
+Baza zestawu w linii 1:
+
+| `base` | Tekst (pl) |
+|---|---|
+| `default` | `zestaw domyślny` |
+| `config` | `sekcje z konfiguracji (<ścieżka>)` — `settings.settings_path()`, katalog domowy jako `~`; także przy `--private` (to nie dane projektu) |
+| `short` / `full` | `--short` / `--full` |
+| `only` | `--only <lista>` |
+| `md` | `wszystkie elementy (domyślnie dla --md)` |
+
+Gdzie stoi: terminal — ostatnie linie `text_report` (po wskazówkach, przed linią zamykającą; porównanie
+i „dzień po dniu” są drukowane wcześniej); HTML — `<p class=sub>` z liniami rozdzielonymi `<br>` (`_settings`),
+po ostatniej sekcji, tuż przed `<footer>` z wagami i datą wygenerowania; MD — ostatnia sekcja pliku
+„## Ustawienia tego raportu” (lista `- …`), a blok raportu w MD jest bez stopki (`text_report(..., footer=False)`),
+żeby nie była dwa razy. Treść we wszystkich trzech jest ta sama. Stopka zastąpiła dawne linie „Więcej
+szczegółów” i „Pełne wyjaśnienie tokenów surowych i ważonych: --explain” (`_FLAGS` / `_more`).
+
+Przykład — raport domyślny (`-l pl`):
+
+```text
+ Ustawienia: zestaw domyślny · tabele krótkie (5 wierszy)
+ Więcej szczegółów: --time --breakdown --cache --bash --skills --project-map  albo --full (wszystko)
+ Własny zestaw na stałe: --configure · tokeny surowe i ważone: --explain
+```
+
+Przykład — konfiguracja `{"level":"compact","elements":["activities","sessions","skills"]}` + `--bash --diff --daily`:
+
+```text
+ Ustawienia: sekcje z konfiguracji (~/.claude/claude-token-report.json) + --bash · tabele krótkie (5 wierszy) · porównanie z 2026-10-12..2026-10-18 (7 dni), bez porównania: sessions, skills · dzień po dniu
+ Więcej szczegółów: --time --breakdown --cache --project-map  albo --full (wszystko)
+ Bez konfiguracji: --no-config · zmiana: --configure · tokeny surowe i ważone: --explain
+```
+
+Przykład — `--short --diff` (en):
+
+```text
+ Settings: --short · compact tables (5 rows) · compared with 2026-10-12..2026-10-18 (7 days), not compared: sessions
+ More detail: --time --breakdown --cache --bash --skills --project-map  or --full (everything)
+ Your own saved set: --configure · raw and weighted tokens: --explain
+```
 
 ## Plik konfiguracji i migracja starych poziomów
 
@@ -175,6 +233,7 @@ Kolejność w raporcie jest zawsze kolejnością `ELEMENTS`, nie kolejnością n
 | `--short` + `--full` | `--short and --full exclude each other …` |
 | `--only` + `--short` albo `--full` | `--only and --short exclude each other: both pick the set of sections …` |
 | `--session` + `--diff` | `--diff does not work with --session: a single session has no previous window …` |
+| `--all` + `--diff` | `--diff does not work with --all: all history has no previous window to compare with` |
 | osobne polecenie + opcja raportu | `--list is a separate command, it takes no report options: --bash` |
 | dwa osobne polecenia naraz | `give one command at a time, got: --list --explain` |
 | nieznany element w `--only` | `argument --only: unknown element: foo (allowed: …)` |
@@ -185,7 +244,7 @@ Osobne polecenia: `--list`, `--explain`, `--configure`, `--reset-config`. Opcje 
 `--short`, `--full`, `--long`, `--only`, `--diff`, `--daily`, `--session`, `--html`, `--md`, `--private`, `--no-config`.
 Opcje globalne dozwolone wszędzie: `--lang`, `--color` / `--no-color`, `--dir`.
 
-`--session --daily` jest dozwolone (dni jednej sesji).
+`--session --daily` i `--all --daily` są dozwolone (dni jednej sesji / całej historii).
 
 ## Testy
 
@@ -199,4 +258,7 @@ porównanie, `--short --daily --html` — „dzień po dniu”), `--session --sh
 `tests/test_waste.py` — plan `--short --bash` renderuje sekcję bash w tekście i HTML; porównanie szumu Basha
 (`test_diff_compares_the_bash_noise`). Porównanie według elementów: `test_diff_follows_the_elements_of_the_report`
 i `test_diff_names_the_elements_without_comparison` (tekst, HTML, MD), `test_diff_notes_the_elements_without_comparison`
-(`plan.notes`), lista porównywalnych w `test_element_info_covers_every_element`.
+(`plan.notes`), lista porównywalnych w `test_element_info_covers_every_element`. Stopka: `DescribePlanTest`
+w `tests/test_options.py` (bazy `default`, `config` + flaga, `short` z `--diff --daily`, `only`, `full`, `md`,
+po polsku, ścieżka z `~`), `test_every_format_ends_with_the_settings_footer` (tekst, HTML, MD mówią to samo,
+stopka raz) i `test_footer_follows_the_preset` w `tests/test_end_to_end.py`.

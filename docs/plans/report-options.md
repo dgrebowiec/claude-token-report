@@ -8,7 +8,7 @@
 | 2 | Szczegółowość = tylko długość tabel (`compact` / `long`) | DONE |
 | 3 | Raport skrócony jako zestaw sekcji, a nie osobny tryb renderowania | DONE |
 | 4 | Porównanie (`--diff`) zgodne z sekcjami raportu | DONE |
-| 5 | Stopka „Ustawienia tego raportu” | TODO |
+| 5 | Stopka „Ustawienia tego raportu” | DONE |
 | 6 | `--dry-run`: co pokaże raport, bez liczenia | TODO |
 | 7 | Konfigurator: ekran z pełną listą opcji i ich stanem | TODO |
 | 8 | README i dokumentacja opcji | TODO |
@@ -349,13 +349,15 @@ jasnym błędem; raport i konfigurator mówią, co pokazano, czego nie i dlaczeg
   poziomów przestały istnieć); reszta pomocy i README zostaje w kroku 8.
 - 2026-10-25 (krok 3) — `ReportContext.wants`/`shows` zastąpione jedną metodą `has(element)` (= `plan.has`),
   zamiast dwóch metod o tym samym działaniu.
+- 2026-10-25 (krok 5, decyzja koordynatora; rozstrzyga otwarte pytanie z kroku 4) — `--all --diff` → twardy
+  błąd w `options.resolve` (kod 2, jak `--session --diff`): cała historia nie ma poprzedniego okresu do
+  porównania. Innych okresów bez poprzedniego nie ma (`previous_window_start` → `None` tylko przy
+  `window.start is None`: `--all` i `--session` bez okresu, oba już błędem).
+- 2026-10-25 (krok 5) — `ReportPlan` dostaje pole `only` (elementy z `--only`), żeby stopka odróżniała je od
+  dopisanych flag sekcji (`origin` dla obu = `flag`).
 
 ## Otwarte pytania
 
 <Brak. Wcześniejsza praca zacommitowana w `main` 2026-10-25 (a4af4fc); gałąź `report-options` zakładaj od `main`.>
-
-- 2026-10-25 (krok 4) — `--diff` z okresem bez początku (`--all`) nie ma poprzedniego okresu, więc blok
-  porównania znika bez słowa (`periods.previous_window_start` → `None`). Do decyzji: twardy błąd w `resolve`
-  (jak `--session --diff`) czy uwaga w stopce (krok 5). Nie zmienione w kroku 4.
 
 Nie pushuj niczego do `main` (decyzja właściciela 2026-10-25) — tylko lokalne commity.

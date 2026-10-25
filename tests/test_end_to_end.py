@@ -1,6 +1,7 @@
 """Runs the whole pipeline on a small synthetic ~/.claude/projects directory."""
 import contextlib
 import datetime
+import html
 import io
 import json
 import os
@@ -251,7 +252,7 @@ class EndToEndTest(unittest.TestCase):
 
     def test_html_short_keeps_comparison_and_daily(self):
         path = os.path.join(self.tmp.name, "r.html")
-        self.run_cli("--all", "--short", "--diff", "--html", path)
+        self.run_cli("--all", "--short", "--html", path)
         with open(path, encoding="utf-8") as f:
             page = f.read()
         self.assertIn("Heaviest conversations", page)
@@ -339,6 +340,44 @@ class EndToEndTest(unittest.TestCase):
         page = page[:page.index("<h2>", 5)]
         md = md.split("## Comparison with the previous period")[1].split("## ")[0]
         return text, page, md
+
+    def test_every_format_ends_with_the_settings_footer(self):
+        self.save_settings("compact", ["activities", "cache"])
+        text = self.run_cli("--days", "3650", "--diff", "--bash")
+        page_path = os.path.join(self.tmp.name, "r.html")
+        md_path = os.path.join(self.tmp.name, "r.md")
+        self.run_cli("--days", "3650", "--diff", "--bash", "--html", page_path)
+        self.run_cli("--days", "3650", "--diff", "--bash", "--md", md_path)
+        with open(page_path, encoding="utf-8") as f:
+            page = f.read()
+        with open(md_path, encoding="utf-8") as f:
+            md = f.read()
+        settings = ("Settings: sections from the configuration (" + self.config
+                    + ") + --bash · compact tables (5 rows) · compared with ")
+        more = "More detail: --time --breakdown --skills --project-map  or --full (everything)"
+        change = "Without the configuration: --no-config · change it: --configure"
+        last = [l.strip() for l in text.rstrip().splitlines()[-4:-1]]  # above the closing rule
+        self.assertTrue(last[0].startswith(settings), last)
+        self.assertNotIn("not compared", last[0])  # activities, cache, bash: all compared
+        self.assertEqual(last[1], more)
+        self.assertTrue(last[2].startswith(change))
+        self.assertEqual(text.count("Settings: "), 1)
+        tail = page[page.rindex("<p class=sub>"):page.index("<footer>")]
+        self.assertIn(html.escape(settings), tail)
+        self.assertIn(more, tail)
+        self.assertIn(change, tail)
+        footer = md.rstrip().split("## Settings of this report")[1]
+        self.assertIn("- " + settings, footer)
+        self.assertIn("- " + more, footer)
+        self.assertEqual(md.count("Settings: "), 1)  # not in the report block as well
+        # the three formats say the same
+        self.assertEqual(last, [l[2:] for l in footer.strip().splitlines()][:3])
+
+    def test_footer_follows_the_preset(self):
+        self.assertIn("Settings: --short · compact tables (5 rows)", self.run_cli("--all", "--short"))
+        out = self.run_cli("--all", "--only", "models", "--long")
+        self.assertIn("Settings: --only models · long tables (10 rows)", out)
+        self.assertIn("Your own saved set: --configure", out)
 
     def test_diff_follows_the_elements_of_the_report(self):
         self.save_settings("compact", ["activities", "sessions"])  # no models

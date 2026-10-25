@@ -14,7 +14,7 @@ from .formatting import (arrow, fmt_change, fmt_delta, fmt_int, fmt_tok, home_re
                          side_name)
 from .hotspots import LARGE_FILE, Item, ProjectHotspots, column_name, limits_note, status
 from .i18n import L, get_lang, weekday
-from .options import no_comparison_note
+from .options import describe_plan, no_comparison_note
 from .pricing import TOKEN_TYPES, TYPE_WEIGHTS, model_weight, type_name, unknown_models
 from .report_text import diff_takeaways
 from .session_detail import (SessionDetail, details_for, effort_name, fmt_duration,
@@ -686,17 +686,10 @@ def _project_map(stats: Stats) -> str:
     return "\n".join(parts)
 
 
-_FLAGS = [("time", "--time"), ("breakdown", "--breakdown"), ("cache", "--cache"),
-          ("bash", "--bash"), ("skills", "--skills"), ("map", "--project-map")]
-
-
-def _more(ctx: ReportContext) -> str:
-    missing = [f for key, f in _FLAGS if not ctx.has(key)]
-    if not missing:
-        return ""
-    flags = " ".join(f"<code>{f}</code>" for f in missing)
-    return (f"<p class=sub>{L('Więcej szczegółów (wygeneruj raport z flagami): ', 'More detail (generate the report with the flags): ')}"
-            f"{flags} {L('albo', 'or')} <code>--full</code> {L('(wszystko).', '(everything).')}</p>")
+def _settings(ctx: ReportContext) -> str:
+    """the footer "Settings of this report" (options.describe_plan), as in the terminal"""
+    lines = "<br>".join(E(line) for line in describe_plan(ctx.plan, ctx.prev_label))
+    return f"<p class=sub>{lines}</p>"
 
 
 def _tips(stats: Stats, ctx: ReportContext) -> str:
@@ -746,7 +739,7 @@ def html_report(stats: Stats, ctx: ReportContext, prev: Optional[Stats] = None,
         _heaviest_sessions(stats, ctx) if ctx.has("sessions") else "",
         *optional,
         _tips(stats, ctx) if ctx.has("tips") else "",
-        _more(ctx),
+        _settings(ctx),
         _footer(),
         "</main>",
         tooltip,

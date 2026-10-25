@@ -15,6 +15,7 @@ Precedence, strongest first:
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -82,6 +83,7 @@ class ReportPlan:
     session: bool = False  # --session: a single session
     origin: Dict[str, str] = field(default_factory=dict)  # element -> default|config|preset|flag
     base: str = "default"  # where the base set comes from: default|config|short|full|only|md
+    only: Tuple[str, ...] = ()  # the elements named in --only (base "only")
     notes: Tuple[str, ...] = ()  # soft remarks for the report footer
 
     def has(self, element: str) -> bool:
@@ -142,6 +144,11 @@ def _check_conflicts(args: argparse.Namespace) -> None:
                              "okresu do porównania",
                              "--diff does not work with --session: a single session has no "
                              "previous window to compare with"))
+    if args.all and args.diff:
+        raise OptionsError(L("--diff nie działa z --all: cała historia nie ma poprzedniego okresu "
+                             "do porównania",
+                             "--diff does not work with --all: all history has no previous "
+                             "window to compare with"))
 
 
 def resolve(args: argparse.Namespace, saved: Optional[Settings]) -> ReportPlan:
@@ -174,4 +181,57 @@ def resolve(args: argparse.Namespace, saved: Optional[Settings]) -> ReportPlan:
     note = no_comparison_note(elements) if args.diff else ""
     return ReportPlan(elements=elements, long_tables=long_tables, diff=args.diff,
                       daily=args.daily, session=args.session is not None, origin=origin,
-                      base=base, notes=(note,) if note else ())
+                      base=base, only=tuple(args.only or ()), notes=(note,) if note else ())
+
+
+def _config_display(path: Optional[str]) -> str:
+    if path is None:
+        from .settings import settings_path  # read when the footer is made (tests set the env)
+        path = str(settings_path())
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if home and path.startswith(home + os.sep) else path
+
+
+def describe_plan(plan: ReportPlan, prev_label: str = "",
+                  config_path: Optional[str] = None) -> List[str]:
+    """the footer "Settings of this report": where the set of elements comes from, the table
+    length, the modifiers; the sections left out; how to change it. 2-3 short lines."""
+    bases = {
+        "default": L("zestaw domyślny", "the default set"),
+        "config": L("sekcje z konfiguracji (", "sections from the configuration (")
+                  + _config_display(config_path) + ")",
+        "short": "--short",
+        "full": "--full",
+        "only": "--only " + ",".join(plan.only),
+        "md": L("wszystkie elementy (domyślnie dla --md)", "every element (the --md default)"),
+    }
+    base = bases.get(plan.base, plan.base)
+    added = [SECTION_FLAGS[e] for e in plan.elements
+             if e in SECTION_FLAGS and plan.origin.get(e) == "flag" and e not in plan.only]
+    if added:
+        base += " + " + " ".join(added)
+    parts = [base, L("tabele długie (10 wierszy)", "long tables (10 rows)") if plan.long_tables
+             else L("tabele krótkie (5 wierszy)", "compact tables (5 rows)")]
+    if plan.diff:
+        diff = (L("porównanie z ", "compared with ") + prev_label if prev_label
+                else L("porównanie z poprzednim okresem", "compared with the previous window"))
+        missing = uncompared(plan.elements)
+        if missing:  # the line under the comparison names them too; here only in brief
+            diff += L(", bez porównania: ", ", not compared: ") + ", ".join(missing)
+        parts.append(diff)
+    if plan.daily:
+        parts.append(L("dzień po dniu", "day by day"))
+    lines = [L("Ustawienia: ", "Settings: ") + " · ".join(parts)]
+    left_out = [flag for key, flag in SECTION_FLAGS.items() if not plan.has(key)]
+    if left_out:
+        lines.append(L("Więcej szczegółów: ", "More detail: ") + " ".join(left_out)
+                     + L("  albo --full (wszystko)", "  or --full (everything)"))
+    change = (L("bez konfiguracji: --no-config · zmiana: --configure",
+                "without the configuration: --no-config · change it: --configure")
+              if plan.base == "config"
+              else L("własny zestaw na stałe: --configure", "your own saved set: --configure"))
+    lines.append(change[0].upper() + change[1:] + " · "
+                 + L("tokeny surowe i ważone: --explain", "raw and weighted tokens: --explain"))
+    shown = no_comparison_note(plan.elements)  # already under the comparison block
+    lines += [n for n in plan.notes if n != shown]
+    return lines

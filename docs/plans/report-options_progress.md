@@ -184,3 +184,51 @@ Plan: [report-options.md](report-options.md)
     nazwy projektów w HTML nie są przycinane (tekst przycina do 37 znaków).
   - `report_html` importuje `diff_takeaways` z `report_text` (jedno miejsce treści wniosków).
   - Znalezione, nie zmienione: `--all --diff` gubi porównanie bez słowa — wpisane do „Otwarte pytania”.
+
+## 2026-10-25 — Krok 5: Stopka „Ustawienia tego raportu”
+
+- Status: DONE.
+- Zrobione:
+  - `options.py`: `describe_plan(plan, prev_label="", config_path=None) -> List[str]` — linie: „Ustawienia:
+    <baza> [+ flagi sekcji] · tabele krótkie/długie [· porównanie z <okres>, bez porównania: …] [· dzień po
+    dniu]”, „Więcej szczegółów: <brakujące flagi>  albo --full (wszystko)” (gdy coś brakuje), „Bez konfiguracji:
+    --no-config · zmiana: --configure” albo „Własny zestaw na stałe: --configure”, zawsze „· tokeny surowe
+    i ważone: --explain”; potem pozostałe `plan.notes`. Ścieżka konfiguracji z `settings.settings_path()`,
+    katalog domowy jako `~`. Nowe pole `ReportPlan.only`. Twardy błąd `--all --diff`.
+  - `report_text.text_report(..., footer=True)`: stopka zamiast linii „Więcej szczegółów” i „Pełne wyjaśnienie…
+    --explain”; `_FLAGS` usunięte. `report_html`: `_more` i `_FLAGS` zastąpione `_settings(ctx)`
+    (`<p class=sub>`, linie przez `<br>`), tuż przed `<footer>`. `report_md`: blok raportu bez stopki
+    (`footer=False`), stopka jako ostatnia sekcja „## Ustawienia tego raportu” (lista).
+  - Testy: `tests/test_options.py` — `DescribePlanTest` (6 testów: default, config + `--bash` + long,
+    `--short --diff --daily`, `--only` + flaga / `--full` / `--md`, po polsku, `~` w ścieżce), `--all --diff`
+    w `test_hard_errors` (+ `--all --daily` i `--rolling --diff` dozwolone) i w `CliErrorTest` (kod 2);
+    `tests/test_end_to_end.py` — `test_every_format_ends_with_the_settings_footer` (tekst/HTML/MD te same
+    linie, stopka raz), `test_footer_follows_the_preset`; `test_html_short_keeps_comparison_and_daily` —
+    pierwsze wywołanie bez `--diff` (było `--all --short --diff`, teraz błąd).
+  - `docs/references/report-options.md`: sekcja „Stopka „Ustawienia tego raportu”” z przykładami, `only`
+    w tabeli `ReportPlan`, błąd `--all --diff`, usunięta uwaga o `--all`.
+  - Plan: otwarte pytanie z kroku 4 przeniesione do „Zmiany planu” z decyzją; dopisane pole `only`.
+- Weryfikacja:
+  - `python3 -m unittest` — 104 testy OK (było 96).
+  - Ręcznie (`CLAUDE_TOKEN_REPORT_CONFIG` w scratchpadzie, nieistniejący albo
+    `{"level":"compact","elements":["activities","sessions","skills"]}`): raport domyślny (en, pl), z konfiguracją,
+    z konfiguracją + `--bash --diff --daily`, `--short --diff`, `--all --daily`, `--session`, HTML i MD
+    (`--bash --diff`, `--no-config --md`, `--session --no-config --html`) — każdy kończy się stopką, tekst/HTML/MD
+    te same linie; `--all --diff` → kod 2 z komunikatem (en i pl).
+- Decyzje / odstępstwa:
+  - Linia „Bez porównania: …” nie jest powtarzana w stopce jako osobna linia (raport pokazuje ją pod blokiem
+    porównania, a z `--diff` blok jest zawsze — po błędzie `--all --diff` nie ma już przypadku bez bloku);
+    stopka podaje te elementy skrótowo w linii „Ustawienia” („…, bez porównania: sessions, skills”), żeby sama
+    mówiła wszystko. Pozostałe `plan.notes` (dziś brak) trafiają do stopki jako osobne linie.
+  - Linia o `--explain` wcielona do trzeciej linii stopki („· tokeny surowe i ważone: --explain”) — jedna
+    stopka zamiast trzech osobnych podpowiedzi.
+  - HTML: stopka ustawień przed `<footer>` z wagami/datą (ten zostaje ostatni, jak dotąd); flagi w HTML zwykłym
+    tekstem (wcześniej `<code>`), żeby treść była ta sama co w terminalu.
+  - MD: stopka na końcu pliku (po „Jak czytać liczby”), nie w bloku raportu — inaczej byłaby dwa razy.
+  - `--md` bez niczego: stopka bez „Więcej szczegółów” (wszystkie sekcje są).
+  - Pole `ReportPlan.only` (zamiast zmiany `origin` dla `--only` na nową wartość) — `origin` zostaje jak w kroku 1.
+- `--diff` bez poprzedniego okresu (sprawdzone w `cli.py` / `periods.py`): `previous_window_start` zwraca `None`
+  tylko dla `window.start is None` — `--all` oraz `--session` bez okresu (`cli.main` zeruje `window.start`);
+  `--session` z `--diff` to błąd od kroku 1 (także z okresem), więc jedynym nowym błędem jest `--all --diff`.
+  `--rolling` / ułamkowe `--days` mają poprzednie okno; poprzedni okres bez wywołań daje porównanie z zerami
+  (widoczne), nie cichy brak.

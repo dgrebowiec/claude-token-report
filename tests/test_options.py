@@ -8,8 +8,8 @@ from unittest import mock
 
 from token_report import i18n
 from token_report.cli import build_parser, main
-from token_report.options import (ELEMENT_INFO, OptionsError, no_comparison_note, resolve,
-                                  uncompared)
+from token_report.options import (ELEMENT_INFO, OptionsError, describe_plan,
+                                  no_comparison_note, resolve, uncompared)
 from token_report.settings import CORE, ELEMENTS, Settings, describe_level, from_dict
 
 
@@ -179,6 +179,9 @@ class MigrationTest(unittest.TestCase):
         self.assertError("--full", "--only", "models", words=("--only", "--full"))
         self.assertError("--session", "--diff", words=("--session", "--diff"))
         self.assertError("--session", "abc", "--diff", words=("--session", "--diff"))
+        self.assertError("--all", "--diff", words=("--all", "--diff"))
+        plan("--all", "--daily")  # day by day over all history: allowed
+        plan("--days", "2", "--rolling", "--diff")  # a rolling window has a previous one
 
     def test_separate_commands_take_no_report_options(self):
         for cmd in (["--list"], ["--list", "5"], ["--explain"], ["--configure"], ["--reset-config"]):
@@ -199,6 +202,67 @@ class MigrationTest(unittest.TestCase):
         for cmd in ("--list", "--explain", "--configure", "--reset-config"):
             plan(cmd, "--lang", "pl", "--no-color", "--dir", "/x")
             plan(cmd, "--color")
+
+
+class DescribePlanTest(unittest.TestCase):
+    """the footer "Settings of this report" (options.describe_plan)"""
+
+    def setUp(self):
+        i18n.set_lang("en")
+
+    def footer(self, *argv, saved=None, prev=""):
+        return describe_plan(plan(*argv, saved=saved), prev, config_path="/cfg/settings.json")
+
+    def test_default(self):
+        lines = self.footer()
+        self.assertEqual(lines[0], "Settings: the default set · compact tables (5 rows)")
+        self.assertEqual(lines[1], "More detail: --time --breakdown --cache --bash --skills "
+                                   "--project-map  or --full (everything)")
+        self.assertEqual(lines[2], "Your own saved set: --configure · "
+                                   "raw and weighted tokens: --explain")
+        self.assertEqual(len(lines), 3)
+
+    def test_config_with_a_section_flag(self):
+        saved = Settings(level="long", elements=["activities", "cache"])
+        lines = self.footer("--bash", saved=saved)
+        self.assertEqual(lines[0], "Settings: sections from the configuration "
+                                   "(/cfg/settings.json) + --bash · long tables (10 rows)")
+        self.assertIn("--time --breakdown --skills --project-map", lines[1])
+        self.assertTrue(lines[2].startswith("Without the configuration: --no-config · "
+                                            "change it: --configure"))
+
+    def test_short_with_diff_and_daily(self):
+        lines = self.footer("--short", "--diff", "--daily", prev="2026-10-08..2026-10-14 (7 days)")
+        self.assertEqual(lines[0], "Settings: --short · compact tables (5 rows) · compared with "
+                                   "2026-10-08..2026-10-14 (7 days), not compared: sessions · "
+                                   "day by day")
+        # the "Not compared" line is under the comparison already: not repeated as its own line
+        self.assertFalse(any(l.startswith("Not compared") for l in lines))
+
+    def test_only_and_full(self):
+        self.assertEqual(self.footer("--only", "models,cache", "--bash")[0],
+                         "Settings: --only models,cache + --bash · compact tables (5 rows)")
+        full = self.footer("--full")
+        self.assertEqual(full[0], "Settings: --full · long tables (10 rows)")
+        self.assertEqual(len(full), 2)  # nothing left out: no "More detail"
+        self.assertIn("--md default", self.footer("--md", "x")[0])
+
+    def test_polish(self):
+        i18n.set_lang("pl")
+        try:
+            lines = self.footer("--long", "--diff")
+        finally:
+            i18n.set_lang("en")
+        self.assertEqual(lines[0], "Ustawienia: zestaw domyślny · tabele długie (10 wierszy) · "
+                                   "porównanie z poprzednim okresem, bez porównania: sessions, tips")
+        self.assertTrue(lines[1].startswith("Więcej szczegółów: --time"))
+
+    def test_config_path_shown_with_a_tilde(self):
+        home = os.path.expanduser("~")
+        with mock.patch.dict(os.environ, {"CLAUDE_TOKEN_REPORT_CONFIG":
+                                          os.path.join(home, ".claude", "x.json")}):
+            line = describe_plan(plan(saved=Settings(elements=["models"])))[0]
+        self.assertIn("(~/.claude/x.json)", line)
 
 
 class CliErrorTest(unittest.TestCase):
@@ -226,6 +290,7 @@ class CliErrorTest(unittest.TestCase):
     def test_errors_exit_with_code_2(self):
         self.assertIn("--short and --full", self.run_error("--short", "--full"))
         self.assertIn("--session", self.run_error("--session", "--diff"))
+        self.assertIn("all history has no previous window", self.run_error("--all", "--diff"))
         out = self.run_error("--list", "--bash")
         self.assertIn("separate command", out)
         self.assertIn("--bash", out)

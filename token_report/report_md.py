@@ -7,6 +7,7 @@ from .context import ReportContext
 from .daily import DayRow
 from .explain import explain_text
 from .i18n import L
+from .options import describe_plan
 from .report_text import text_daily, text_diff, text_report
 from .stats import Stats
 
@@ -39,7 +40,9 @@ def md_report(stats: Stats, ctx: ReportContext, prev_stats: Optional[Stats],
                   _block(text_diff(stats, prev_stats, ctx))]
     if daily:
         parts += ["## " + L("Dzień po dniu", "Day by day"), _block(text_daily(daily))]
-    parts += ["## " + L("Raport", "Report"), _block(text_report(stats, ctx)),
+    parts += ["## " + L("Raport", "Report"), _block(text_report(stats, ctx, footer=False)),
               "## " + L("Jak czytać liczby", "How to read the numbers"),
-              _block(explain_text())]
+              _block(explain_text()),
+              "## " + L("Ustawienia tego raportu", "Settings of this report"),
+              "\n".join("- " + line for line in describe_plan(ctx.plan, ctx.prev_label))]
     return "\n\n".join(parts) + "\n"
