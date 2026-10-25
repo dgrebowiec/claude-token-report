@@ -60,15 +60,13 @@ class _Style:
         return self._wrap("35", text)
 
     def bar(self, frac: float, width: int = 20) -> str:
-        raw = bar(frac, width)
+        raw = bar(frac, max(1, width - 1))
         if not self.enabled:
-            return raw
-        dots = raw.find("·")
-        if dots == -1:
-            return self.cyan(raw)
-        if dots == 0:
-            return self.dim(raw)
-        return self.cyan(raw[:dots]) + self.dim(raw[dots:])
+            return "│" + raw
+        dots = raw.find("▯")
+        fill = raw if dots == -1 else raw[:dots]
+        tone = self.yellow if frac >= 0.4 else self.cyan if frac >= 0.1 else self.dim
+        return self.dim("│") + tone(fill) + (self.dim(raw[dots:]) if dots != -1 else "")
 
     def delta(self, text: str, diff: float) -> str:
         if not self.enabled or abs(diff) < 1e-9:

@@ -130,12 +130,12 @@ def _preview(element: str, level: str, width: int, color: bool) -> List[str]:
             f" {bc}── {L('NA CO IDĄ TOKENY', 'WHERE THE TOKENS GO')} ──{rst}",
             f" {b}{L('czynność', 'activity'):<30}{L('surowe', 'raw'):>8}{L('ważone', 'weighted'):>9}{'%':>6}{L('użyć', 'uses'):>7}{L('śr./szt.', 'avg'):>9}{rst}",
             f" {col_rule}",
-            f" Bash: searching (grep/find/ls)   82.7M   {b}10.4M{rst} 22.4%    903     12k  {c}████{d}············{rst}",
-            f" Bash: scripts (python/node/own)  61.1M   {b} 6.3M{rst} 13.5%    459     14k  {c}███{d}·············{rst}",
-            f" Edit/Write — changing files      29.9M   {b} 4.5M{rst}  9.8%    646      7k  {c}██{d}··············{rst}",
+            f" Bash: searching (grep/find/ls)   82.7M   {b}10.4M{rst} 22.4%    903     12k  {d}│{rst}{c}▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" Bash: scripts (python/node/own)  61.1M   {b} 6.3M{rst} 13.5%    459     14k  {d}│{rst}{c}▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" Edit/Write — changing files      29.9M   {b} 4.5M{rst}  9.8%    646      7k  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
         ]
         if level == "long":
-            lines.append(f" Read — reading files             39.2M   {b} 3.7M{rst}  8.0%    878      4k  {c}██{d}··············{rst}")
+            lines.append(f" Read — reading files             39.2M   {b} 3.7M{rst}  8.0%    878      4k  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}")
         lines.append(f" {d}│ {limit_note}{rst}")
         return lines
 
@@ -146,8 +146,8 @@ def _preview(element: str, level: str, width: int, color: bool) -> List[str]:
             f" {bc}── {L('MODELE', 'MODELS')} ──{rst}",
             f" {b}{'model':<22}{L('surowe', 'raw'):>8}{L('ważone', 'weighted'):>9}{'%':>6}{L('wywoł.', 'calls'):>7}{L('waga', 'weight'):>7}{rst}",
             f" {col_rule}",
-            f" claude-opus-5-5       327.9M   {b}40.1M{rst} 86.3%   2501   x0.8  {c}███████████{d}··{rst}",
-            f" claude-sonnet-5-5      78.7M   {b} 6.3M{rst} 13.5%    912   x0.4  {c}██{d}···········{rst}",
+            f" claude-opus-5-5       327.9M   {b}40.1M{rst} 86.3%   2501   x0.8  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮▮{d}▯▯{rst}",
+            f" claude-sonnet-5-5      78.7M   {b} 6.3M{rst} 13.5%    912   x0.4  {d}│{rst}{c}▮▮{d}▯▯▯▯▯▯▯▯▯▯▯{rst}",
             f" claude-haiku-5-5       10.6M   {b} 126k{rst}  0.3%    109  x0.02  {d}·············{rst}",
         ]
         lines.append(f" {d}│ {limit_note}{rst}")
@@ -181,18 +181,18 @@ def _preview(element: str, level: str, width: int, color: bool) -> List[str]:
     if element == "time":
         return [
             f" {bc}── {L('RODZAJE TOKENÓW — surowe vs ważone', 'TOKEN TYPES — raw vs weighted')} ──{rst}",
-            f" cache read             391.4M   {b}13.9M{rst} 29.9%  {c}████████{d}··················{rst}",
-            f" cache write 5 min       16.6M   {b}13.8M{rst} 29.8%  {c}████████{d}··················{rst}",
-            f" output (response)        3.0M   {b}10.3M{rst} 22.1%  {c}██████{d}····················{rst}",
+            f" cache read             391.4M   {b}13.9M{rst} 29.9%  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" cache write 5 min       16.6M   {b}13.8M{rst} 29.8%  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" output (response)        3.0M   {b}10.3M{rst} 22.1%  {d}│{rst}{c}▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
             f" {d}│ {L('rozbicie kosztów cache vs wyjście, rozkład dzienny/tygodniowy i trend głównych czynności', 'cache vs output breakdown, daily/weekly distribution and the trend of top activities')}{rst}",
         ]
 
     if element == "breakdown":
         return [
             f" {bc}── {L('SESJA GŁÓWNA vs SUBAGENCI & PROJEKTY', 'MAIN vs SUBAGENTS & PROJECTS')} ──{rst}",
-            f" " + L("subagenci", "subagents") + f"             246.2M   {b}28.8M{rst} 61.9%    2086  {c}████████████{d}········{rst}",
-            f" " + L("sesja główna", "main session") + f"          171.0M   {b}17.7M{rst} 38.1%    1436  {c}████████{d}············{rst}",
-            f" AISudokuAndroid        201.3M   {b}24.4M{rst} 52.4%    1891  {c}██████████{d}··········{rst}",
+            f" " + L("subagenci", "subagents") + f"             246.2M   {b}28.8M{rst} 61.9%    2086  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯{rst}",
+            f" " + L("sesja główna", "main session") + f"          171.0M   {b}17.7M{rst} 38.1%    1436  {d}│{rst}{c}▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯▯▯{rst}",
+            f" AISudokuAndroid        201.3M   {b}24.4M{rst} 52.4%    1891  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯▯{rst}",
             f" {d}│ {L('udział subagentów, subagenci wg typu i podział zużycia wg projektów', 'subagents share, subagents by type and usage split across projects')}{rst}",
         ]
 
@@ -203,7 +203,7 @@ def _preview(element: str, level: str, width: int, color: bool) -> List[str]:
         gap_word = L("przerwa", "pause")
         return [
             f" {bc}── {L('DŁUGOŚĆ ROZMOWY & WYGASŁY CACHE', 'CONVERSATION LENGTH & EXPIRED CACHE')} ──{rst}",
-            f" 100-200k               1546 {calls_word}  {b}23.4M{rst} {wt_word} (50.4%)  {c}█████████{d}·········{rst}",
+            f" 100-200k               1546 {calls_word}  {b}23.4M{rst} {wt_word} (50.4%)  {d}│{rst}{c}▮▮▮▮▮▮▮▮▮{d}▯▯▯▯▯▯▯▯▯{rst}",
             f" " + L("wygasły cache", "expired cache") + f"          104 {calls_word}   {b}11.2M{rst} {extra_word}  ({gap_word} > 60 min: 34×)",
             f" {d}│ {L('koszt długich rozmów, zapisów cache od nowa (sesje, zdarzenia) i powtórnych odczytów', 'cost of long context, cache rewrites (sessions, events) and repeated reads')}{rst}",
         ]
