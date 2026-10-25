@@ -300,3 +300,73 @@ Plan: [report-options.md](report-options.md)
   - Ostrzeżenie „--diff nie porówna: …” pojawia się także dla częściowego braku porównania (też przy konfiguracji
     domyślnej: sessions, tips) — tak samo mówi stopka raportu z `--diff`.
   - `s` w pełnym ekranie otwiera ten sam ekran co ENTER (z możliwością zapisu ENTER / `w`).
+
+## 2026-10-25 — Krok 8: README i dokumentacja opcji
+
+- Status: DONE.
+- Zrobione:
+  - `README.md` (po angielsku, jak całość): sekcja „Sections: default, optional and `--full`” zastąpiona
+    „What the report shows: options” — tabela osi, elementy i ich flagi (z nazwami elementów do `--only`),
+    presety i `--only`, `--long` (liczby wierszy, elementy bez tabel), reguły pierwszeństwa, tabela twardych
+    błędów, `--diff` według elementów, stopka (przykład `--short --diff`), `--dry-run` (przykład
+    `--short --bash --diff --dry-run`). „Configure the report interactively” przepisane: `←` `→` = długość
+    tabel `compact`/`long`, klawisz `s`, ENTER → podsumowanie → ENTER zapisuje, ekran podsumowania z `⚠`,
+    tryb liniowy (`s`, `w` + potwierdzenie `y`), konfiguracja działa też dla `--md`, migracja starych poziomów.
+    W „Usage”: przykłady `--bash --long`, `--only models,cache`, `--short --diff --dry-run`; poprawione
+    `--session --short` (szczegóły sesji, czynności i fazy — od kroku 3) i `--md` („every section by default”,
+    a nie zawsze „full detail”); usunięty akapit o `--short` (opis był sprzeczny z modelem: „leaves out …
+    tips”, osobny tryb); link do nowej sekcji. W tabeli modułów dopisany `options.py`.
+  - `token_report/cli.py` (`build_parser`, wszystko przez `L`): epilog — nowe przykłady (`--only`, `--long`,
+    `--dry-run`), opisy `--short`/`--full` jako zestawów, blok „jak łączą się opcje” (osie, 4 reguły, stopka,
+    `--dry-run`); grupa sekcji → „elementy (… flaga sekcji dopisuje …)”; `--short`, `--full`, `--only`
+    (zastępują zapisany zestaw, `--only` nie z presetem), `--long`, `--diff` (co porównuje, nie z `--all`/
+    `--session`), `--md` (kiedy wszystkie elementy), `--configure` (podsumowanie przed zapisem), `--no-config`;
+    `--list`, `--explain`, `--configure`, `--reset-config` oznaczone „osobne polecenie”.
+  - `docs/references/report-options.md`: przejrzane jako stan obecny — usunięte zdania historyczne („nie ma już
+    pól …”, „jak dotąd”, „Stopka zastąpiła dawne linie …”), przykład reguły 3 z `"level": "compact"` zamiast
+    starego `normal`, reguła 2 uzupełniona (preset / `--only` zastępuje też zapisaną długość tabel — sprawdzone
+    na `resolve`: zapisany `long` + `--short` / `--only` → krótkie tabele), odnośnik do README i `--help`.
+  - Inne pliki w `docs/`: `docs/claude-token-report.md` i `docs/plan-rozbudowy-claude-token-report.md` to
+    raport o narzędziach oszczędzania tokenów i zrealizowany plan skilli — nie opisują opcji raportu ani
+    poziomów (trafienia „minimal” to słowo „minimalny”); `docs/templates/` — bez opcji raportu. Bez zmian.
+- Weryfikacja:
+  - `python3 -m unittest` — 119 testów OK (bez nowych testów; zmiany w tekstach pomocy i dokumentacji).
+  - `grep -rn "minimal\|detailed" README.md token_report/` — tylko `settings.py` (`OLD_LEVELS`, docstring
+    i komentarz `from_dict`) i akapit README o migracji starego pliku.
+  - `python3 -m token_report --help` i `-l pl --help` przeczytane: grupy, opisy flag i epilog zgodne z modelem.
+  - Przykłady w README sprawdzone uruchomieniem (`CLAUDE_TOKEN_REPORT_CONFIG` na pliki w scratchpadzie):
+    `--short --bash --diff --dry-run` (wynik wklejony 1:1), konfiguracja `activities, cache` + `--bash`,
+    `--md X --dry-run` z konfiguracją i bez, `--session --short --dry-run`, każdy błąd z tabeli błędów (kod 2),
+    liniowy konfigurator (`s`, `q`) — treść ostrzeżeń `⚠`.
+- Odstępstwa: brak zmian w kodzie poza tekstami pomocy.
+
+## 2026-10-25 — Podsumowanie planu: definicja ukończenia
+
+- Przypadki 1–8 z „Kontekstu” — naprawione, każdy ma test:
+  1. `--short --diff --html` bez porównania → `test_end_to_end.test_html_short_keeps_comparison_and_daily`
+     (porównanie i „dzień po dniu” w HTML z `--short`); zgodność tekst/HTML/MD —
+     `test_diff_follows_the_elements_of_the_report`.
+  2. `--session --diff` znika bez słowa → `test_options.ResolveTest.test_hard_errors`
+     (`--session --diff`, `--session abc --diff`), kod 2: `CliErrorTest.test_errors_exit_with_code_2`.
+  3. `--short --bash --full` bez błędu → `test_hard_errors` (`--short --full` → błąd);
+     `--short --bash` dopisuje sekcję: `test_section_flag_adds_to_the_preset`,
+     `test_end_to_end.test_short_is_a_set_of_elements`, `test_waste` (plan `--short --bash`, tekst i HTML).
+  4. `--diff` porównuje stały zestaw → `test_end_to_end.test_diff_follows_the_elements_of_the_report`,
+     `test_diff_names_the_elements_without_comparison`, `test_options.test_diff_notes_the_elements_without_comparison`,
+     `test_waste.test_diff_compares_the_bash_noise`.
+  5. Poziomy mieszają dwie osie → `test_options.MigrationTest` (każdy stary poziom),
+     `test_long_flag_makes_tables_long_and_keeps_the_elements`, `test_element_info_covers_every_element`,
+     `test_end_to_end.test_long_flag_lengthens_tables_only`, `test_saved_minimal_level_migrates_to_its_elements`.
+  6. `--full` = dwie rzeczy, łatka `only_chosen` → `test_options.ResolveTest.test_presets` (`--full` =
+     wszystkie elementy + `long`), `test_saved_long_means_long_tables`, `test_long_flag_…` (długość osobno);
+     pól nie ma (sprawdzone `dataclasses.fields(ReportContext)`: `label, root_display, sessions, namer, calls,
+     session, session_key, prev_label, detail, plan`).
+  7. Konfiguracja ignorowana przy fladze sekcji → `test_options.test_section_flag_adds_to_the_saved_settings`,
+     `test_end_to_end.test_saved_settings_choose_elements`.
+  8. Ukryta reguła `--md` → `test_options.test_md_alone_is_full` (jawne `base="md"` w `resolve`).
+- `python3 -m unittest` przechodzi — 119 testów (na starcie planu 64).
+- `ReportContext` nie ma pól `short`, `full`, `only_chosen` (ani `sections`, `core`) — zastąpione `plan`.
+- README („What the report shows: options”, „Configure the report interactively”) i
+  `docs/references/report-options.md` opisują model osi i reguły pierwszeństwa; `--help` ma ten sam model
+  w skrócie.
+- Wszystkie kroki 1–8 `DONE`; otwartych pytań brak. Zmiany kroku 8 niezacommitowane (polecenie koordynatora).

@@ -302,22 +302,22 @@ python3 claude_token_report.py --from 09-01 --to 09-15   # a date range (inclusi
 python3 claude_token_report.py --today --diff   # today vs yesterday
 python3 claude_token_report.py -l pl            # Polish
 python3 claude_token_report.py --short          # main numbers, activities, models, heaviest conversations
+python3 claude_token_report.py --bash --long    # the default report + Bash noise, longer tables
+python3 claude_token_report.py --only models,cache      # only these elements (and the summary)
 python3 claude_token_report.py --list           # recent sessions
 python3 claude_token_report.py --session 1a2b   # one session in detail (no value = the latest)
-python3 claude_token_report.py --session 1a2b --short    # only the session details and phases
+python3 claude_token_report.py --session 1a2b --short    # the session details, activities and phases
 python3 claude_token_report.py --html report.html --private   # shareable HTML, no names or prompts
-python3 claude_token_report.py --md report.md --daily            # Markdown for Claude to analyze (full detail, with task and glossary)
+python3 claude_token_report.py --md report.md --daily            # Markdown for Claude to analyze (every section by default, with task and glossary)
+python3 claude_token_report.py --short --diff --dry-run          # what the report would contain, nothing read
 ```
 
 Dates: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM-DD` (current year), `today`, `yesterday`.
+How the options combine: [What the report shows](#what-the-report-shows-options).
 
 `--daily` compares every day with the day before it: the change in weighted tokens (▲/▼), cache hit rate,
 usage per call and the activity that changed the most. It works in the terminal and in the HTML report.
 In the HTML report every metric has a `?` you can hover over or tap for an explanation.
-
-`--short` leaves out the long sections at the end (token types, conversation length, expired cache,
-repeated reads, project map, tips) and keeps the summary, activities, models and the heaviest
-conversations. It works with `--html` too.
 
 ## One session in detail
 
@@ -370,25 +370,129 @@ and [the Claude Code docs](https://code.claude.com/docs/en/memory) advise keepin
 moving guidance for one part of the code to `.claude/rules/` with a `paths:` field.
 With `--private` the section is hidden, since file and class names reveal the project.
 
-## Sections: default, optional and `--full`
+## What the report shows: options
 
-The default report is short (about 75 lines): the summary, where the tokens go, models, the
-heaviest conversations and **what you could improve**. A tip about something that is not shown
-ends with the flag that shows it (`Details: --cache`). Add sections as you need them; the same
-flags work for `--html`:
+Each option sets one of a few independent things, so they combine freely. A combination that
+cannot work stops with an error; nothing is dropped without a word.
 
-| Flag | Adds |
+| What | Values | Set by |
+| :--- | :--- | :--- |
+| period | last 7 days by default; `--days`, `--date`, `--from`/`--to`, `--today`, `--yesterday`, `--all`, `--rolling` | one of these flags |
+| scope | all history in the period, or one session | `--session` |
+| elements | the summary (always) + `activities`, `models`, `sessions`, `tips`, `time`, `breakdown`, `cache`, `bash`, `skills`, `map` | saved configuration, `--short` / `--full`, `--only`, section flags |
+| table length | `compact` (rankings of 5 rows) or `long` (10 rows) | saved configuration, `--full`, `--long` |
+| modifiers | `--diff`, `--daily` | flags |
+
+### Elements
+
+The default report is short (about 75 lines): the summary, where the tokens go (`activities`),
+`models`, the heaviest conversations (`sessions`) and **what you could improve** (`tips`).
+A tip about something that is not shown ends with the flag that shows it (`Details: --cache`).
+Add sections as you need them; the same flags work for `--html` and `--md`:
+
+| Flag | Element | Adds |
+| :--- | :--- | :--- |
+| `--time` | `time` | token types (raw vs weighted) and usage over time |
+| `--breakdown` | `breakdown` | main session vs subagents, subagent types, projects |
+| `--cache` | `cache` | conversation length, expired cache, long conversations, repeated file reads (below) |
+| `--bash` | `bash` | Bash noise (below) |
+| `--skills` | `skills` | skills (below) |
+| `--project-map` | `map` | the project map (above) |
+
+Flags combine: `claude-token-report --bash --skills --html report.html`.
+
+### Presets and `--only`
+
+A preset is only a named set of elements and a table length, not a different kind of report:
+
+| Option | Elements | Tables |
+| :--- | :--- | :--- |
+| nothing (and no saved configuration) | `activities`, `models`, `sessions`, `tips` | compact |
+| `--short` | `activities`, `models`, `sessions` | compact |
+| `--full` | every element | long |
+| `--only LIST` | the listed elements, comma-separated (`--only models,cache`) | compact |
+| `--md FILE` with no preset, `--only`, section flag or saved configuration | every element | long |
+| saved configuration (`--configure`) | the saved elements | the saved length |
+
+So `--short --bash` is the short set plus Bash noise, `--short --long` the short set with long
+tables, and `--short --diff` / `--short --daily` keep the comparison and the day by day view,
+in the HTML report too. Elements always come in the fixed order `activities`, `models`, `sessions`,
+`tips`, `time`, `breakdown`, `cache`, `bash`, `skills`, `map`, whatever the order in `--only`.
+
+### Table length: `--long`
+
+`--long` makes the rankings longer and changes nothing else: activities 8 → 16 rows (20 in HTML),
+models 5 → 10, heaviest conversations 5 → 10 (15 in HTML), skills 5 → 10 per list. `tips`, `time`,
+`breakdown`, `cache`, `bash` and `map` have no tables of variable length, so `long` does not change
+them (`--dry-run` and the configurator say so). `--full` is every element plus `--long`.
+
+### Which option wins
+
+1. Conflicting options in one command are an error (below).
+2. `--short`, `--full` or `--only` replaces the saved set of elements and its table length for that
+   run (add `--long` for long tables).
+3. A section flag **adds** its section to the base set (the saved configuration, the preset or the
+   default set): with `activities` and `cache` saved, `--bash` shows activities, cache and Bash noise.
+4. `--no-config` ignores the saved configuration for that run.
+5. `--diff` and `--daily` work on what is in the report; they never turn on a hidden element.
+
+These stop with an error (exit code 2) and say why:
+
+| Combination | Why |
 | :--- | :--- |
-| `--time` | token types (raw vs weighted) and usage over time |
-| `--breakdown` | main session vs subagents, subagent types, projects |
-| `--cache` | conversation length, expired cache, long conversations, repeated file reads (below) |
-| `--bash` | Bash noise (below) |
-| `--skills` | skills (below) |
-| `--project-map` | the project map (above) |
-| `--full` | every section and longer tables |
+| `--short --full`, `--only` with `--short` or `--full` | each picks the set of elements |
+| `--session --diff`, `--all --diff` | there is no previous window to compare with |
+| more than one way to set the period (`--days 3 --today`) | one period at a time |
+| `--list`, `--explain`, `--configure`, `--reset-config` with a report option (`--list --bash`) or with each other | they are separate commands |
+| an unknown name in `--only` | the message lists the allowed names |
 
-`--short` is still the shortest report, without the tips. Flags combine:
-`token_report --bash --skills --html report.html`.
+`--lang`, `--color` / `--no-color` and `--dir` work with everything. `--session --daily` and
+`--all --daily` work (the days of one session, of all history).
+
+### `--diff` follows the elements
+
+The comparison with the previous window always has the general numbers (model calls, raw and
+weighted tokens, average per call, cache hit rate) and a part for each element in the report that
+can be compared: `activities`, `models`, `time` (token types), `breakdown` (projects), `cache`
+(share of long conversations and of the expired cache) and `bash` (share of Bash noise).
+`sessions`, `tips`, `skills` and `map` have no comparison; a line under it names the ones in the
+report (`Not compared: sessions, tips`). The terminal, HTML and Markdown show the same parts.
+
+### Report footer
+
+Every report (terminal, HTML and Markdown) ends with the settings behind it: where the set of
+elements came from, the table length, the comparison, and what to add or change. For example,
+`--short --diff`:
+
+```
+ Settings: --short · compact tables (5 rows) · compared with 2026-10-12..2026-10-18 (7 days), not compared: sessions
+ More detail: --time --breakdown --cache --bash --skills --project-map  or --full (everything)
+ Your own saved set: --configure · raw and weighted tokens: --explain
+```
+
+### `--dry-run`: check the options first
+
+`--dry-run` prints what the report would contain and stops. It reads no transcripts and writes no
+`--html` / `--md` file, but option errors work as usual. `--short --bash --diff --dry-run`:
+
+```
+--dry-run: what the report would show — nothing counted, no transcripts read
+ Period:       last 7 days (2026-10-19..2026-10-25)
+ Scope:        all history in the period
+ Elements:     summary     always
+               activities  --short
+               models      --short
+               sessions    --short
+               bash        --bash
+ Tables:       compact (5 rows)
+ Modifiers:    --diff: compared with 2026-10-12..2026-10-18 (7 days); not compared: sessions
+ Output:       the terminal
+ Transcripts:  ~/.claude/projects (not checked)
+ Report footer:
+   Settings: --short + --bash · compact tables (5 rows) · compared with 2026-10-12..2026-10-18 (7 days), not compared: sessions
+   More detail: --time --breakdown --cache --skills --project-map  or --full (everything)
+   Your own saved set: --configure · raw and weighted tokens: --explain
+```
 
 ## Configure the report interactively
 
@@ -396,31 +500,43 @@ flags work for `--html`:
 claude-token-report --configure        # or: python3 -m token_report --configure
 ```
 
-A full-screen editor (like `claude-statusline configure`) with a live list of what the report
-will contain:
+A full-screen editor (like `claude-statusline configure`) for the saved set of elements and the
+table length, with a live preview of the selected section:
 
 | Key | Action |
 | --- | --- |
 | `↑` `↓` (or `k` `j`) | select an element (live preview updates below) |
 | `space` (or a digit `1`-`9`, `0`) | show / hide the element |
-| `←` `→` | detail level: `minimal`, `normal`, `detailed` (preview reflects level) |
+| `←` `→` | table length: `compact` / `long` (preview reflects it) |
 | `a` / `n` | all elements / none |
 | `r` / `d` | reset to defaults |
-| `enter` | save and exit |
+| `s` | the settings summary |
+| `enter` | the settings summary, then `enter` again to save and exit |
 | `q` / `Esc` | quit (asks again if there are unsaved changes) |
 
-Levels: `minimal` is the `--short` report (only activities, models and heaviest conversations
-can be chosen), `normal` the default one, `detailed` has the long tables of `--full`. Elements:
-`activities`, `models`, `sessions`, `tips`, plus the optional sections `time`, `breakdown`,
-`cache`, `bash`, `skills`, `map`. The editor displays a live preview of the currently selected
-section according to the selected detail level. When stdin is not a terminal it falls back to text commands,
-one per line (`<n>` toggles, `l` level, `a`, `n`, `r` / `d` defaults, `w` save, `q` quit).
+The **settings summary** lists every element: on (`✓`) or off (`·`), whether `long` makes its
+tables longer, and whether `--diff` compares it. Under the list, `⚠` lines name the settings that
+would have no effect, for example:
+
+```
+ ⚠ long does not change: cache, bash (fixed length, no tables)
+ ⚠ --diff will not compare: sessions, skills
+```
+
+In the summary `enter` (or `w`) saves and any other key goes back to editing. When stdin is not a
+terminal the editor falls back to text commands, one per line (`<n>` toggles, `l` table length,
+`a`, `n`, `r` / `d` defaults, `s` summary, `w` summary and save once you confirm with `y`, `q` quit).
 
 The choice is saved in `~/.claude/claude-token-report.json` (override with
-`CLAUDE_TOKEN_REPORT_CONFIG`) and applies to every text and `--html` report. Any of `--short`,
-`--full` or a section flag (`--cache`, `--bash` ...) overrides it for that run; `--no-config`
-ignores it. To reset saved configuration back to defaults from the CLI, run:
+`CLAUDE_TOKEN_REPORT_CONFIG`) and applies to every report: terminal, `--html` and `--md`. For one run,
+`--short`, `--full` or `--only` replaces it, a section flag adds to it and `--no-config` ignores it
+(see [Which option wins](#which-option-wins)). To reset the saved configuration to defaults, run
 `claude-token-report --reset-config`.
+
+A file saved by an older version, with the detail levels `minimal`, `normal` or `detailed`, still
+loads: `minimal` becomes `compact` keeping only `activities`, `models` and `sessions` (all three if
+none of them was chosen), `normal` becomes `compact` and `detailed` becomes `long`. The next save
+writes the new format.
 
 ## Bash noise and skills
 
@@ -497,6 +613,7 @@ Official sources for the prices and the cache durations (5 minutes / 1 hour):
 | `waste.py` | long unlimited shell results and unused / unnamed skills |
 | `session_detail.py` | the details of one session (`--session`) |
 | `daily.py`, `tips.py` | the `--daily` comparison and the suggestions |
+| `options.py` | which elements, table length and modifiers a report gets, option errors, the report footer, `--dry-run` |
 | `settings.py`, `configure.py` | saved report settings and the interactive `--configure` editor |
 | `periods.py` | `--days/--date/--from...` time windows |
 | `report_text.py`, `report_html.py` | the two reports (HTML styles and script in `assets/`) |

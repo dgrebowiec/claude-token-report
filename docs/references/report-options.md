@@ -6,6 +6,9 @@ Dostaje sparsowane argumenty (`cli.build_parser`) i ustawienia zapisane przez `-
 `cli.main` wywołuje ją zaraz po parsowaniu, przed obsługą jakiegokolwiek polecenia; `OptionsError`
 trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 
+Dla użytkownika ten sam model opisuje README (sekcja „What the report shows: options” i „Configure the report
+interactively”) oraz `--help` (`cli.build_parser`: opisy flag i blok „jak łączą się opcje” w epilogu).
+
 ## Osie
 
 | Oś | Wartości | Skąd |
@@ -32,18 +35,19 @@ trafia do użytkownika jako błąd `argparse` (kod wyjścia 2).
 `ReportContext.plan` przechowuje plan (`cli.main` podaje go przy tworzeniu kontekstu; bez podania —
 plan raportu domyślnego: rdzeń, krótkie tabele). Renderery pytają tylko o plan:
 `ctx.has(element)` = `plan.has(element)`, `ctx.rows` = 10 przy `long_tables`, inaczej 5.
-`ReportContext` nie ma już pól `short`, `full`, `only_chosen`, `sections`, `core`.
+Poza planem `ReportContext` nie niesie żadnych ustawień zestawu ani długości tabel (brak pól typu `short`/`full`) —
+wszystko, co dotyczy elementów, pochodzi z `plan`.
 
 ## Jedna ścieżka renderowania
 
 `report_text.text_report` i `report_html.html_report` mają jedną ścieżkę: podsumowanie (zawsze), bloki
 pojedynczej sesji, potem każdy element planu w stałej kolejności, na końcu stopka „Ustawienia tego raportu”
-(patrz niżej). Nie ma osobnego trybu „raport skrócony” ani jego stopki — `--short` to tylko zestaw elementów, więc:
+(patrz niżej). Nie ma osobnego trybu „raport skrócony” — `--short` to tylko zestaw elementów, więc:
 
 - `--short --bash` (i każda flaga sekcji) dopisuje sekcję do krótkiego zestawu;
 - `--short --long` wydłuża wszystkie tabele krótkiego zestawu (czynności, modele, rozmowy);
 - w HTML porównanie (`--diff`, `_comparison`) i „dzień po dniu” (`--daily`, `_daily`) są składane zawsze, gdy
-  są dane — niezależnie od presetu; w terminalu i MD drukowane jak dotąd przed raportem;
+  są dane — niezależnie od presetu; w terminalu i MD drukowane przed raportem;
 - raport `--short` ma te same liczby wierszy co domyślny (np. czynności 8, modele 5), także w HTML.
 
 Pojedyncza sesja (`--session`): po podsumowaniu bloki `_session_info` / `_session_models` / `_session_files`
@@ -164,8 +168,7 @@ Gdzie stoi: terminal — ostatnie linie `text_report` (po wskazówkach, przed li
 i „dzień po dniu” są drukowane wcześniej); HTML — `<p class=sub>` z liniami rozdzielonymi `<br>` (`_settings`),
 po ostatniej sekcji, tuż przed `<footer>` z wagami i datą wygenerowania; MD — ostatnia sekcja pliku
 „## Ustawienia tego raportu” (lista `- …`), a blok raportu w MD jest bez stopki (`text_report(..., footer=False)`),
-żeby nie była dwa razy. Treść we wszystkich trzech jest ta sama. Stopka zastąpiła dawne linie „Więcej
-szczegółów” i „Pełne wyjaśnienie tokenów surowych i ważonych: --explain” (`_FLAGS` / `_more`).
+żeby nie była dwa razy. Treść we wszystkich trzech jest ta sama.
 
 Przykład — raport domyślny (`-l pl`):
 
@@ -337,10 +340,11 @@ Kolejność w raporcie jest zawsze kolejnością `ELEMENTS`, nie kolejnością n
 ## Reguły pierwszeństwa (od najsilniejszej)
 
 1. Sprzeczne flagi w jednym poleceniu → błąd (lista niżej).
-2. Preset (`--short` / `--full`) albo `--only` zastępuje zestaw z konfiguracji.
+2. Preset (`--short` / `--full`) albo `--only` zastępuje zestaw z konfiguracji razem z jej długością tabel
+   (zapisany `long` nie przechodzi na `--short` / `--only`; długie tabele daje wtedy `--long`).
 3. Flagi sekcji (`--time`, `--breakdown`, `--cache`, `--bash`, `--skills`, `--project-map`) **dopisują**
    sekcje do zestawu bazowego (konfiguracja, preset albo domyślny). Przykład: konfiguracja
-   `{"level": "normal", "elements": ["activities", "cache"]}` + `--bash` → czynności, cache i bash.
+   `{"level": "compact", "elements": ["activities", "cache"]}` + `--bash` → czynności, cache i bash.
 4. `--no-config` → konfiguracja jest pomijana, bazą jest zestaw domyślny (albo `md` dla `--md`).
 5. Modyfikatory (`--diff`, `--daily`) działają na tym, co jest w raporcie, i nie włączają ukrytych elementów.
 
